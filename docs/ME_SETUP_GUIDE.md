@@ -1,0 +1,124 @@
+# Mission Editor setup guide
+
+How to wire the template into a mission. Everything is pure native Lua: no
+MIST/MOOSE/CTLD to load.
+
+## 1. Coalition setup
+
+Add **CJTF Blue** (Combined Joint Task Force Blue) to the blue coalition in
+the mission options: all scripted spawns run under it, so there are no
+per-country unit restrictions. If you prefer another country, change
+`CIV.Config.countryId` at the top of `01_CivilCore.lua`.
+
+## 2. Loading the scripts
+
+Two options:
+
+**A) Single file (recommended for normal use)** — one `MISSION START`
+trigger with a single `DO SCRIPT FILE` action:
+
+```
+dist/CivilMissionTemplate.lua
+```
+
+**B) Modular (for development/testing)** — 5 `DO SCRIPT FILE` actions in
+this order (core first, the others in any order; unused modules can simply
+be omitted):
+
+```
+Scripts/01_CivilCore.lua        <- ALWAYS, first
+Scripts/10_CivilFirefighting.lua
+Scripts/20_CivilRescue.lua      (SAR mountain/sea + MedEvac)
+Scripts/30_CivilPolice.lua      (chase + SWAT)
+Scripts/40_CivilTransport.lua
+```
+
+After any change inside `Scripts/`, regenerate the single file with
+`tools/build.sh` (or by manually concatenating the 5 files in order into one
+.lua).
+
+## 3. Trigger zones to create in the ME
+
+Matching is **by name prefix** (527th CSAR style): any zone whose name
+STARTS with the prefix belongs to that pool — e.g. `CIVIL Fire Point Alpha`,
+`CIVIL Fire Point 12`, `CIVIL Fire Point Forest`. No consecutive numbering
+required. Zones can be **circular or polygon (quad) zones**: vertices and
+properties are read from `env.mission`.
+
+| Prefix / zone name | Use | Placement notes |
+|---|---|---|
+| `CIVIL Fire Region` | firefighting macro-region | large; enables the spotter and the C-130 line drop |
+| `CIVIL Fire Point …` | fire ignition points | forest/fields, away from buildings and roads |
+| `CIVIL Water Point …` | helicopter water pickup | on a body of water, with maneuvering room |
+| `CIVIL C130 Reload` | C-130 retardant reload | apron reachable on the ground; dressed with the loading kit |
+| `CIVIL SAR Mountain Region` + `CIVIL SAR Mountain Point …` | mountain SAR | points reachable in a hover |
+| `CIVIL SAR Sea Region` + `CIVIL SAR Sea Point …` | sea SAR | points on OPEN water (a boat spawns there) |
+| `CIVIL Police Point …` | chase | 30-40 points ON real crossroads, neighbor distance ≤ 1500 m |
+| `CIVIL SWAT Base` | team boarding | apron where the helicopter can land |
+| `CIVIL SWAT Point …` | SWAT scenarios | rooftops / urban LZs (rooftop spawn TO TEST) |
+| `CIVIL Cargo Point …` | cargo loading points | flat ground |
+| `CIVIL Cargo Destination` | cargo delivery | single destination zone |
+| `CIVIL Medevac Point …` | casualty recovery | "hostile"/accident LZs |
+| `CIVIL Hospital …` | hospital pads | on the actual pad; dressed with the medical camp kit; delivery is ZONE-detected (still+low), no FARP needed |
+
+Prefixes are configurable in `CIV.Config.zones` (top of `01_CivilCore.lua`).
+
+## 4. Optional spawn templates (CSAR Pilot style)
+
+**Late-activated** groups placed in the ME: if they exist, spawns are cloned
+from them (units, liveries, country) instead of using the hardcoded fallback
+types. Group-name prefix matching:
+
+| Group prefix | Use | Fallback if absent |
+|---|---|---|
+| `CIVIL Survivor …` | mountain SAR missing person / MedEvac casualty (ground) | `Soldier M4` |
+| `CIVIL Boat …` | sea SAR target (ship) | `ZWEZDNY` |
+| `CIVIL SWAT Team …` | SWAT squad (ground; unit count scaled at insertion) | `Soldier M4` |
+| `CIVIL Fugitive …` | fleeing car (vehicle) | `LandRover_ah` |
+
+## 5. Minimum configuration review
+
+At the top of `01_CivilCore.lua` (`CIV.Config`):
+
+- `countryId`: CJTF Blue by default (see section 1).
+- `capacity`: exact type names of the group's modules with their external
+  load in kg (the API does not expose it: hand-maintained table, values TO
+  VALIDATE).
+- `cargo.tiers`: kg and cargo type per tier (some cargo types have fixed
+  mass: validate in the ME).
+- `hover.*`: T times / windows per operation type.
+- `rescue.intel`: approximate-circle radius and the spotter detection range
+  used to release exact rescue coordinates.
+- `director`: probabilities/intervals of automatic event generation (or
+  `enabled = false` and start everything from the Admin menu).
+- `adminMenu = false` for official events.
+
+## 6. In game
+
+`F10 → Civil Missions` menu:
+
+- **Session leaderboard** — shared live score.
+- **Firefighting** — water pickup / drop / active fires.
+- **Firefighting C-130** — line drop (after ground reload).
+- **Rescue** — smoke from the subject / active events. Exact rescue
+  coordinates appear only after a spotter airplane identifies the subject;
+  until then, reports give a rough direction and an approximate search
+  circle on the F10 map.
+- **Police / SWAT** — board team / team status.
+- **Cargo transport** — change tier of the nearby point / active points.
+- **Admin (test)** — manual start of every event, pool status.
+
+## 7. In-game test checklist (before serious use)
+
+1. Pools and menus: start every event from the Admin menu and check
+   messages/spawns.
+2. Hover: water pickup + one full SAR through to hospital delivery.
+3. Rescue intel: verify the approximate circle, then identify the subject
+   with a C-130 and check the exact-coordinates release.
+4. Cargo types: verify in the ME that the configured types accept the custom
+   mass (weigh them by hooking).
+5. "On Road": watch 2-3 full chases on the pool's crossroads.
+6. SWAT: infantry spawn on a rooftop from the pool.
+7. (Only if wanted) `fire.usePhysicalCargo = true`: cargo spawn on water.
+8. (Only if wanted) beacon: `.ogg` file in the .miz and
+   `rescue.sarMountain.beacon.enabled = true`.

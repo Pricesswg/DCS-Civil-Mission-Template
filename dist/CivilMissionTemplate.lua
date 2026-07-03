@@ -43,7 +43,10 @@ CIV.VERSION = "0.2.0"
 ----------------------------------------------------------------------
 
 CIV.Config = {
-  countryId = country.id.USA,        -- country used for scripted spawns (must exist in the blue coalition)
+  -- Country used for scripted spawns: CJTF Blue (Combined Joint Task Force)
+  -- gives access to every unit without country restrictions. Add CJTF Blue
+  -- to the blue coalition in the ME mission options.
+  countryId = country.id.CJTF_BLUE,
   coalition = coalition.side.BLUE,
   debug     = true,                  -- verbose logging to dcs.log
   adminMenu = true,                  -- F10 "Admin" submenu to start events manually (testing)
@@ -193,6 +196,18 @@ CIV.Config = {
     },
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
+
+    -- Intel model (CSAR-style): exact coordinates are NEVER broadcast on
+    -- event start. The initial report is a rough direction plus an
+    -- approximate search circle on the F10 map (subject inside but NOT
+    -- centered). Exact position is released only when a player airplane
+    -- (C-130 spotter) identifies the subject.
+    intel = {
+      approxRadius = { min = 3000, max = 6000 },   -- approximate search circle radius (m)
+      centerOffset = { min = 0.2, max = 0.7 },     -- subject offset from circle center (fraction of radius)
+      spotterDetectRadius = 8000,                  -- m; an airborne player airplane within this range
+                                                   -- of the subject identifies it (also works with no region)
+    },
   },
 
   ------------------------------------------------------------------
@@ -319,6 +334,21 @@ function CIV.offsetPoint(p, bearingDeg, distM)
   local x = p.x + math.cos(rad) * distM
   local z = (p.z or p.y) + math.sin(rad) * distM
   return { x = x, y = land.getHeight({ x = x, y = z }), z = z }
+end
+
+-- 8-wind cardinal name for a bearing ("N", "NE", ...)
+function CIV.cardinal(bearingDeg)
+  local names = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
+  return names[math.floor(((bearingDeg % 360) + 22.5) / 45) % 8 + 1]
+end
+
+-- Low-precision position report: rough distance (rounded to 5 km) and
+-- cardinal direction from a reference point. Used for unidentified targets.
+function CIV.vagueDirection(fromPoint, fromName, toPoint)
+  local dist = CIV.dist2D(fromPoint, toPoint)
+  local roundedKm = math.max(5, math.floor(dist / 5000 + 0.5) * 5)
+  return string.format("roughly %d km %s of %s", roundedKm,
+    CIV.cardinal(CIV.bearingDeg(fromPoint, toPoint)), fromName)
 end
 
 ----------------------------------------------------------------------
@@ -656,12 +686,12 @@ function CIV.mark(text, p)
 end
 
 -- dashed event circle on the F10 map (CSAR-style); returns mark id or nil
-function CIV.markCircle(p, text)
+function CIV.markCircle(p, text, radiusM)
   local m = CIV.Config.marks
   if not m.drawCircles or not trigger.action.circleToAll then return nil end
   local id = CIV.nextMarkId()
   local ok = pcall(trigger.action.circleToAll, CIV.Config.coalition, id, p,
-    m.circleRadiusM, m.borderColor, m.fillColor, m.lineType, true, text)
+    radiusM or m.circleRadiusM, m.borderColor, m.fillColor, m.lineType, true, text)
   if ok then return id end
   return nil
 end
@@ -1547,10 +1577,16 @@ CIV.log("CivilFirefighting loaded")
 -- Event cycle:
 --   spawn subject on a pool point (from "CIVIL Survivor"/"CIVIL Boat"
 --   template if present, else fallback type) -> optional radio beacon
---   (homing only on Mi-8/UH-1H/SA342/AH-64D; textual coordinates + smoke
---   as fallback) -> extraction via hover watch (first helicopter in the
---   envelope gets the session) -> subject despawned ("aboard") -> zone
---   based delivery at a "CIVIL Hospital" pad (hold low & still for N s).
+--   (homing only on Mi-8/UH-1H/SA342/AH-64D) -> extraction via hover watch
+--   (first helicopter in the envelope gets the session) -> subject
+--   despawned ("aboard") -> zone based delivery at a "CIVIL Hospital" pad
+--   (hold low & still for N s).
+--
+-- Intel model: exact coordinates are NEVER broadcast automatically. The
+-- initial report gives a rough direction and an approximate search circle
+-- on the F10 map (subject inside, NOT centered). The exact position is
+-- released only when a player airplane (C-130 spotter) flies close enough
+-- to identify the subject. Survivor smoke remains available on request.
 --
 -- VERIFIED (concept): S_EVENT_LAND only fires on recognized airbase/FARP/
 -- ship objects, NOT on arbitrary pads -> delivery is zone-based, never
@@ -1619,6 +1655,22 @@ local function closeEvent(sc, evt)
   if evt.gname then CIV.despawnGroup(evt.gname) end
 end
 
+-- reference point/name for the low-precision initial report: the scenario
+-- region if defined, otherwise the nearest hospital pad
+local function vagueReference(def, point)
+  local region = def.region and CIV.Zones.byName(def.region)
+  if region then
+    return { x = region.center.x, z = region.center.z }, region.name
+  end
+  local best, bestDist = nil, 1e12
+  for _, pt in ipairs(CIV.Pool.load(C.zones.hospitals)) do
+    local d = CIV.dist2D(point, pt.point)
+    if d < bestDist then best, bestDist = pt, d end
+  end
+  if best then return best.point, best.name end
+  return nil, nil
+end
+
 function R.startEvent(key)
   local sc = R._scenarios[key]
   if not sc then return nil end
@@ -1648,9 +1700,25 @@ function R.startEvent(key)
   startBeacon(def, evt)
   sc.events[evt.id] = evt
   CIV.Pool.occupy(pt)
-  evt.circleId = CIV.markCircle(evt.point, def.label .. " #" .. evt.id)
 
-  local msg = def.label .. ": subject awaiting recovery.\n" .. CIV.coordText(evt.point)
+  -- Approximate search circle (CSAR opponent-intel style): the subject is
+  -- inside the circle but NOT at its center, and the radius is random.
+  local intel = C.rescue.intel
+  local circleRadius = CIV.randBetween(intel.approxRadius)
+  local circleCenter = CIV.offsetPoint(evt.point, math.random(0, 359),
+    circleRadius * CIV.randBetween(intel.centerOffset))
+  evt.circleId = CIV.markCircle(circleCenter,
+    def.label .. " #" .. evt.id .. " search area", circleRadius)
+  evt.identified = false
+
+  local refPoint, refName = vagueReference(def, evt.point)
+  evt.vagueText = refPoint
+    and CIV.vagueDirection(refPoint, refName, evt.point)
+    or "position unknown"
+
+  local msg = def.label .. ": subject awaiting recovery, " .. evt.vagueText ..
+    ".\nApproximate search area marked on the F10 map. Exact position " ..
+    "requires a spotter aircraft overhead (or request smoke when close)."
   if evt.beaconName then
     msg = msg .. string.format("\nBeacon active on %.3f MHz", def.beacon.freqHz / 1e6)
   end
@@ -1784,33 +1852,41 @@ local function popSmoke(uname)
 end
 
 ----------------------------------------------------------------------
--- SPOTTER: player airplane inside a rescue region relays coordinates
+-- SPOTTER IDENTIFICATION
+-- A subject stays unidentified (vague direction + approximate circle
+-- only) until an airborne player airplane (C-130) either enters the
+-- scenario region or flies within intel.spotterDetectRadius of the
+-- subject. Identification is one-shot: it releases the exact position
+-- and drops a point mark on the F10 map.
 ----------------------------------------------------------------------
 
 CIV.schedule(function(_, t)
+  local detectR = C.rescue.intel.spotterDetectRadius
   for _, sc in pairs(R._scenarios) do
     local region = sc.def.region and CIV.Zones.byName(sc.def.region)
-    if region then
-      local spotter = nil
-      CIV.forEachPlayer(function(u, info)
-        if spotter then return end
-        if info.category == Unit.Category.AIRPLANE and u:inAir()
-           and CIV.Zones.contains(region, u:getPoint()) then
-          spotter = info
-        end
-      end)
-      if spotter then
-        for _, evt in pairs(sc.events) do
-          if not evt.markId then
-            evt.markId = CIV.mark(sc.def.label .. " #" .. evt.id, evt.point)
+    for _, evt in pairs(sc.events) do
+      if not evt.identified then
+        local spotter = nil
+        CIV.forEachPlayer(function(u, info)
+          if spotter then return end
+          if info.category ~= Unit.Category.AIRPLANE or not u:inAir() then return end
+          local p = u:getPoint()
+          if (region and CIV.Zones.contains(region, p))
+             or CIV.dist2D(p, evt.point) <= detectR then
+            spotter = info
           end
-          CIV.msgAll("SPOTTER " .. spotter.playerName .. " (" .. sc.def.label ..
-            "): subject at " .. CIV.llString(evt.point), 15)
+        end)
+        if spotter then
+          evt.identified = true
+          evt.markId = CIV.mark(sc.def.label .. " #" .. evt.id, evt.point)
+          CIV.msgAll("SPOTTER " .. spotter.playerName .. " has identified the " ..
+            sc.def.label .. " #" .. evt.id .. " subject:\n" ..
+            CIV.coordText(evt.point) .. "\nExact position marked on the F10 map.", 20)
         end
       end
     end
   end
-  return t + C.fire.spotterInterval
+  return t + 15
 end, nil, 45)
 
 ----------------------------------------------------------------------
@@ -1858,8 +1934,10 @@ CIV.Menu_register(function(gid, uname)
     for _, sc in pairs(R._scenarios) do
       for _, evt in pairs(sc.events) do
         n = n + 1
-        txt = txt .. string.format("- %s #%d: %s\n", sc.def.label, evt.id,
-          CIV.llString(evt.point))
+        -- exact coordinates only once a spotter has identified the subject
+        local pos = evt.identified and CIV.llString(evt.point)
+          or (evt.vagueText .. " (not identified: needs a spotter overhead)")
+        txt = txt .. string.format("- %s #%d: %s\n", sc.def.label, evt.id, pos)
       end
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active rescue events.", 20)

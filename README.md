@@ -22,20 +22,21 @@ dist/
 tools/
   build.sh                  Concatenates Scripts/ into the single-file build
 docs/
-  CONCEPT.md                Design brief (decisions and verifications, Italian)
-  FATTIBILITA.md            Point-by-point feasibility check (Italian)
-  GUIDA_SETUP_ME.md         Mission Editor setup guide (Italian)
+  CONCEPT.md                Design brief (decisions and verifications)
+  FEASIBILITY.md            Point-by-point feasibility check
+  ME_SETUP_GUIDE.md         Mission Editor setup guide
 ```
 
 ## Quick start
 
-1. Create the trigger zones listed in `docs/GUIDA_SETUP_ME.md`
+1. Add CJTF Blue to the blue coalition (all scripted spawns run under it).
+2. Create the trigger zones listed in `docs/ME_SETUP_GUIDE.md`
    (name-prefix matching, e.g. `CIVIL Fire Point Alpha`; circular or
    polygon zones both work).
-2. Load `dist/CivilMissionTemplate.lua` with a single `DO SCRIPT FILE`
+3. Load `dist/CivilMissionTemplate.lua` with a single `DO SCRIPT FILE`
    action at MISSION START (or the five `Scripts/` files in order,
    `01_CivilCore.lua` first).
-3. In game: `F10 → Civil Missions`.
+4. In game: `F10 → Civil Missions`.
 
 Optional: place late-activated template groups (`CIVIL Survivor`,
 `CIVIL Boat`, `CIVIL SWAT Team`, `CIVIL Fugitive`) to control exactly what

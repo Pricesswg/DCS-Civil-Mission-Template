@@ -33,7 +33,10 @@ CIV.VERSION = "0.2.0"
 ----------------------------------------------------------------------
 
 CIV.Config = {
-  countryId = country.id.USA,        -- country used for scripted spawns (must exist in the blue coalition)
+  -- Country used for scripted spawns: CJTF Blue (Combined Joint Task Force)
+  -- gives access to every unit without country restrictions. Add CJTF Blue
+  -- to the blue coalition in the ME mission options.
+  countryId = country.id.CJTF_BLUE,
   coalition = coalition.side.BLUE,
   debug     = true,                  -- verbose logging to dcs.log
   adminMenu = true,                  -- F10 "Admin" submenu to start events manually (testing)
@@ -183,6 +186,18 @@ CIV.Config = {
     },
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
+
+    -- Intel model (CSAR-style): exact coordinates are NEVER broadcast on
+    -- event start. The initial report is a rough direction plus an
+    -- approximate search circle on the F10 map (subject inside but NOT
+    -- centered). Exact position is released only when a player airplane
+    -- (C-130 spotter) identifies the subject.
+    intel = {
+      approxRadius = { min = 3000, max = 6000 },   -- approximate search circle radius (m)
+      centerOffset = { min = 0.2, max = 0.7 },     -- subject offset from circle center (fraction of radius)
+      spotterDetectRadius = 8000,                  -- m; an airborne player airplane within this range
+                                                   -- of the subject identifies it (also works with no region)
+    },
   },
 
   ------------------------------------------------------------------
@@ -309,6 +324,21 @@ function CIV.offsetPoint(p, bearingDeg, distM)
   local x = p.x + math.cos(rad) * distM
   local z = (p.z or p.y) + math.sin(rad) * distM
   return { x = x, y = land.getHeight({ x = x, y = z }), z = z }
+end
+
+-- 8-wind cardinal name for a bearing ("N", "NE", ...)
+function CIV.cardinal(bearingDeg)
+  local names = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
+  return names[math.floor(((bearingDeg % 360) + 22.5) / 45) % 8 + 1]
+end
+
+-- Low-precision position report: rough distance (rounded to 5 km) and
+-- cardinal direction from a reference point. Used for unidentified targets.
+function CIV.vagueDirection(fromPoint, fromName, toPoint)
+  local dist = CIV.dist2D(fromPoint, toPoint)
+  local roundedKm = math.max(5, math.floor(dist / 5000 + 0.5) * 5)
+  return string.format("roughly %d km %s of %s", roundedKm,
+    CIV.cardinal(CIV.bearingDeg(fromPoint, toPoint)), fromName)
 end
 
 ----------------------------------------------------------------------
@@ -646,12 +676,12 @@ function CIV.mark(text, p)
 end
 
 -- dashed event circle on the F10 map (CSAR-style); returns mark id or nil
-function CIV.markCircle(p, text)
+function CIV.markCircle(p, text, radiusM)
   local m = CIV.Config.marks
   if not m.drawCircles or not trigger.action.circleToAll then return nil end
   local id = CIV.nextMarkId()
   local ok = pcall(trigger.action.circleToAll, CIV.Config.coalition, id, p,
-    m.circleRadiusM, m.borderColor, m.fillColor, m.lineType, true, text)
+    radiusM or m.circleRadiusM, m.borderColor, m.fillColor, m.lineType, true, text)
   if ok then return id end
   return nil
 end
