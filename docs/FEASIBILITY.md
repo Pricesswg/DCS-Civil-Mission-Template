@@ -70,8 +70,10 @@ These match the concept's list; each item ships with an escape route.
 10. **AI vessel routing on open water** — vessels get a single waypoint
     toward the search area; ship pathfinding on open water is generally
     reliable (no known "On Road"-class bug), but shallow water or islands
-    between vessel and target can stall them: place rescue vessels with a
-    clear run to the SAR sea regions.
+    between vessel and target can stall them: place rescue vessels, harbor
+    spawn zones and mother ships with a clear run to the SAR sea regions.
+    Also validate the stock boat type name (`fallbackTypes.rescueBoat`,
+    default `speedboat`) or place a `CIVIL Vessel` late-activated template.
 11. **C-130 airdrop detection (official module)** — the scripting API cannot
    read the module's cargo bay, and how the official module exposes airdrops
    is undocumented. Two parallel detection channels are implemented

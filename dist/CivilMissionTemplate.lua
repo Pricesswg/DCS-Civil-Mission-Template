@@ -74,6 +74,7 @@ CIV.Config = {
     medevacPoints     = "CIVIL Medevac Point",
     casevacPoints     = "CIVIL Casevac Point",        -- battlefield casualty extraction LZs
     hospitals         = "CIVIL Hospital",             -- hospital pads: delivery is ZONE-based, never S_EVENT_LAND
+    vesselSpawn       = "CIVIL Vessel Spawn",         -- harbor zones where stock rescue boats are launched
   },
 
   ------------------------------------------------------------------
@@ -85,14 +86,16 @@ CIV.Config = {
     survivor = "CIVIL Survivor",   -- ground group: SAR mountain / medevac casualty
     casualty = "CIVIL Casualty",   -- ground group: battlefield CASEVAC casualty
     boat     = "CIVIL Boat",       -- ship group: SAR sea target
+    vessel   = "CIVIL Vessel",     -- ship group: spawned rescue boat
     swatTeam = "CIVIL SWAT Team",  -- ground group: SWAT squad (unit count from template scaled at spawn)
     fugitive = "CIVIL Fugitive",   -- vehicle group: police chase car
   },
   fallbackTypes = {
-    survivor = "Soldier M4",
-    boat     = "ZWEZDNY",          -- TO VALIDATE on the chosen map
-    swat     = "Soldier M4",
-    fugitive = "LandRover_ah",     -- TO VALIDATE on the chosen map
+    survivor   = "Soldier M4",
+    boat       = "ZWEZDNY",        -- TO VALIDATE on the chosen map
+    rescueBoat = "speedboat",      -- stock small boat, TO VALIDATE type name
+    swat       = "Soldier M4",
+    fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
   },
 
   ------------------------------------------------------------------
@@ -244,13 +247,35 @@ CIV.Config = {
     -- with groupPrefix are tasked toward the APPROXIMATE search area when a
     -- sea SAR event starts (consistent with the intel model: they do not
     -- know the exact position), and re-tasked to the exact point once a
-    -- spotter identifies the subject. Purely narrative/scenic pressure:
-    -- the extraction is still the helicopter's job.
+    -- spotter identifies the subject.
+    --
+    -- SEA RESCUE FALLBACK: a vessel holding within rescueRadius of the
+    -- subject for rescueHoldSeconds completes the rescue by sea. The score
+    -- goes to the identifying SPOTTER (the C-130 made it possible); without
+    -- identification vessels only reach the approximate circle center, so a
+    -- sea rescue realistically requires the spotter. If the helicopter's
+    -- hover window expires while vessels are en route, the subject is NOT
+    -- lost yet: the event stays alive for one extra window to let the boats
+    -- arrive, then fails for good.
+    --
+    -- If fewer pre-placed vessels than perEvent are available, stock boats
+    -- are SPAWNED from the nearest origin among: mother ships (the
+    -- hospitalShips units, e.g. a Perry or a Tarawa) and "CIVIL Vessel
+    -- Spawn" harbor zones. Balance rule for harbor placement: travel time
+    -- = distance / speed should be slightly LONGER than the helicopter
+    -- hover window, so the boat is the second chance, not a competitor.
     vessels = {
       enabled = true,
       groupPrefix = "CIVIL Rescue Vessel",
-      speed = 9,        -- m/s route speed
-      perEvent = 2,     -- vessels dispatched per event (nearest first)
+      speed = 9,               -- m/s route speed (~17.5 kts)
+      perEvent = 2,            -- vessels dispatched per event (nearest first)
+      rescueRadius = 200,      -- m: vessel within this of the subject...
+      rescueHoldSeconds = 60,  -- ...for this long = rescued by sea
+      spotterScoreMult = 0.8,  -- sea-rescue score multiplier for the identifying spotter
+      spawn = {
+        enabled = true,
+        offsetFromShip = 150,  -- m, boats spawn this far from the mother ship (clear of the hull)
+      },
     },
 
     -- Mobile landing zone (big-ship mod): ship UNITS whose name starts with
@@ -923,14 +948,16 @@ function CIV.spawnGround(p, count, templatePrefix, fallbackType, namePrefix)
   return gname
 end
 
--- Ship group (SAR sea): from template if present, else fallback type
-function CIV.spawnBoat(p, namePrefix)
-  local name = CIV.spawnFromTemplate(CIV.Config.templates.boat, p, 1)
+-- Ship group: from template if present, else fallback type. Defaults spawn
+-- the SAR sea target; pass templatePrefix/fallbackType for other boats
+-- (e.g. spawned rescue boats).
+function CIV.spawnBoat(p, namePrefix, templatePrefix, fallbackType)
+  local name = CIV.spawnFromTemplate(templatePrefix or CIV.Config.templates.boat, p, 1)
   if name then return name end
   local gname = CIV.uniqueName(namePrefix or "CIVIL_BOAT")
   coalition.addGroup(CIV.Config.countryId, Group.Category.SHIP, {
     visible = false, lateActivation = false, name = gname, groupId = nextGroupId(),
-    units = { { type = CIV.Config.fallbackTypes.boat, name = gname .. "_1",
+    units = { { type = fallbackType or CIV.Config.fallbackTypes.boat, name = gname .. "_1",
                 unitId = nextUnitId(), x = p.x, y = p.z, heading = 0, skill = "Average" } },
     route = { points = { { x = p.x, y = p.z, type = "Turning Point", speed = 0 } } },
   })
@@ -1417,7 +1444,7 @@ CIV.schedule(function()
   local z = CIV.Config.zones
   for _, prefix in pairs({ z.firePoints, z.waterPoints, z.sarMountainPoints,
       z.sarSeaPoints, z.policePoints, z.swatPoints, z.cargoPoints,
-      z.medevacPoints, z.casevacPoints, z.hospitals }) do
+      z.medevacPoints, z.casevacPoints, z.hospitals, z.vesselSpawn }) do
     CIV.Pool.load(prefix)
   end
 end, nil, 3)
@@ -2009,6 +2036,31 @@ local function taskVessel(gname, point, speed)
   return ok
 end
 
+-- Nearest launch origin for spawned boats: mother ships (the hospital-ship
+-- units, e.g. a Perry or a Tarawa) or "CIVIL Vessel Spawn" harbor zones.
+local function nearestBoatOrigin(point)
+  local best, bestDist = nil, 1e12
+  for _, ship in ipairs(CIV.Ships) do
+    if CIV.startsWith(ship.unitName, C.rescue.hospitalShips.unitPrefix) then
+      local su = Unit.getByName(ship.unitName)
+      if su and su:isExist() then
+        local sp = su:getPoint()
+        local d = CIV.dist2D(sp, point)
+        if d < bestDist then
+          best, bestDist = { point = sp, name = ship.unitName, isShip = true }, d
+        end
+      end
+    end
+  end
+  for _, pt in ipairs(CIV.Pool.load(C.zones.vesselSpawn)) do
+    local d = CIV.dist2D(pt.point, point)
+    if d < bestDist then
+      best, bestDist = { point = pt.point, name = pt.name, isShip = false }, d
+    end
+  end
+  return best
+end
+
 local function dispatchVessels(evt)
   local vcfg = C.rescue.vessels
   if not vcfg.enabled then return end
@@ -2036,6 +2088,28 @@ local function dispatchVessels(evt)
       evt.vessels[#evt.vessels + 1] = cand.gname
     end
   end
+  -- not enough pre-placed vessels: launch stock boats from the nearest
+  -- origin (mother ship if it is closer than the harbors)
+  evt.spawnedVessels = {}
+  if vcfg.spawn.enabled and #evt.vessels < vcfg.perEvent then
+    local origin = nearestBoatOrigin(evt.approxCenter)
+    if origin then
+      local launchPoint = origin.point
+      if origin.isShip then
+        -- clear of the mother ship's hull, offset toward the event
+        launchPoint = CIV.offsetPoint(origin.point,
+          CIV.bearingDeg(origin.point, evt.approxCenter), vcfg.spawn.offsetFromShip)
+      end
+      while #evt.vessels < vcfg.perEvent do
+        local gname = CIV.spawnBoat(launchPoint, "CIVIL_RESCUEBOAT",
+          C.templates.vessel, C.fallbackTypes.rescueBoat)
+        evt.vessels[#evt.vessels + 1] = gname
+        evt.spawnedVessels[#evt.spawnedVessels + 1] = gname
+        CIV.schedule(function() taskVessel(gname, evt.approxCenter, vcfg.speed) end, nil, 2)
+      end
+      CIV.msgAll("Rescue boat(s) launched from " .. origin.name .. ".", 12)
+    end
+  end
   if #evt.vessels > 0 then
     CIV.msgAll(#evt.vessels .. " rescue vessel(s) underway to the search area.", 12)
   end
@@ -2051,7 +2125,12 @@ local function releaseVessels(evt)
   for _, gname in ipairs(evt.vessels or {}) do
     vesselBusy[gname] = nil
   end
+  -- spawned boats are despawned after a scenic delay; pre-placed ones stay
+  for _, gname in ipairs(evt.spawnedVessels or {}) do
+    CIV.schedule(function() CIV.despawnGroup(gname) end, nil, 120)
+  end
   evt.vessels = nil
+  evt.spawnedVessels = nil
 end
 
 local function closeEvent(sc, evt)
@@ -2165,9 +2244,20 @@ function R.startEvent(key)
         "still for " .. C.rescue.delivery.holdSeconds .. " seconds.", 20)
     end,
     onFail = function()
-      CIV.msgAll(def.label .. ": recovery FAILED at " .. pt.name ..
-        " (window expired). The subject did not make it.", 20)
-      closeEvent(sc, evt)
+      -- Sea events with vessels en route are NOT lost yet: the event stays
+      -- alive for one extra window so the boats can complete the rescue
+      -- (spotter credit). Everything else fails as before.
+      if def.kind == "boat" and evt.vessels and #evt.vessels > 0 then
+        evt.heloFailed = true
+        evt.hardDeadline = timer.getTime() + hp.window
+        CIV.msgAll(def.label .. ": helicopter recovery window EXPIRED at " ..
+          pt.name .. ". Rescue vessels are still en route: the subject is " ..
+          "holding on for now.", 20)
+      else
+        CIV.msgAll(def.label .. ": recovery FAILED at " .. pt.name ..
+          " (window expired). The subject did not make it.", 20)
+        closeEvent(sc, evt)
+      end
     end,
   })
   CIV.log("Rescue " .. key .. " event #" .. evt.id .. " at " .. pt.name)
@@ -2317,6 +2407,7 @@ CIV.schedule(function(_, t)
         end)
         if spotter then
           evt.identified = true
+          evt.spotterName = spotter.playerName   -- credited on a sea rescue
           evt.markId = CIV.mark(sc.def.label .. " #" .. evt.id, evt.point)
           retaskVessels(evt, evt.point)   -- vessels steer to the exact position
           CIV.msgAll("SPOTTER " .. spotter.playerName .. " has identified the " ..
@@ -2328,6 +2419,59 @@ CIV.schedule(function(_, t)
   end
   return t + 15
 end, nil, 45)
+
+----------------------------------------------------------------------
+-- SEA RESCUE BY VESSEL
+-- A vessel holding within rescueRadius of the subject for
+-- rescueHoldSeconds completes the rescue by sea; the identifying spotter
+-- gets the score (the C-130 made the sea rescue possible). Also enforces
+-- the extended hard deadline after a failed helicopter window.
+----------------------------------------------------------------------
+
+CIV.schedule(function(_, t)
+  local vcfg = C.rescue.vessels
+  local now = timer.getTime()
+  for _, sc in pairs(R._scenarios) do
+    if sc.def.kind == "boat" then
+      for _, evt in pairs(sc.events) do
+        if evt.heloFailed and now > evt.hardDeadline then
+          CIV.msgAll(sc.def.label .. ": the subject was lost at sea before " ..
+            "the vessels could arrive.", 20)
+          closeEvent(sc, evt)
+        elseif evt.gname then
+          local near = false
+          for _, gname in ipairs(evt.vessels or {}) do
+            local g = Group.getByName(gname)
+            local u = g and g:getUnit(1)
+            if u and u:isExist()
+               and CIV.dist2D(u:getPoint(), evt.point) <= vcfg.rescueRadius then
+              near = true
+              break
+            end
+          end
+          if near then
+            evt.vesselNearSince = evt.vesselNearSince or now
+            if now - evt.vesselNearSince >= vcfg.rescueHoldSeconds then
+              if evt.watch then CIV.Hover.unwatch(evt.watch) end
+              local msg = sc.def.label .. ": subject RECOVERED by a rescue vessel."
+              if evt.spotterName then
+                CIV.Score.award(evt.spotterName, sc.def.scoreType, 0.7, 0.5,
+                  vcfg.spotterScoreMult, "sea rescue (spotter credit)")
+              else
+                msg = msg .. " No spotter on station: no credit assigned."
+              end
+              CIV.msgAll(msg, 20)
+              closeEvent(sc, evt)
+            end
+          else
+            evt.vesselNearSince = nil
+          end
+        end
+      end
+    end
+  end
+  return t + 5
+end, nil, 25)
 
 ----------------------------------------------------------------------
 -- SCENARIO INSTANCES

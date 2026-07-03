@@ -61,6 +61,7 @@ properties are read from `env.mission`.
 | `CIVIL Medevac Point …` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point …` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin) |
 | `CIVIL Hospital …` | hospital pads | on the actual pad; dressed with the medical camp kit; delivery is ZONE-detected (still+low), no FARP needed |
+| `CIVIL Vessel Spawn …` | rescue boat harbors | on open water near a harbor. BALANCE RULE: place them so that distance / boat speed (9 m/s ≈ 17.5 kts) is slightly LONGER than the sea SAR hover window (default 25 min ≈ 13.5 km) — the boat is the second chance, not a competitor to the helicopter |
 
 Prefixes are configurable in `CIV.Config.zones` (top of `01_CivilCore.lua`).
 
@@ -75,6 +76,7 @@ types. Group-name prefix matching:
 | `CIVIL Survivor …` | mountain SAR missing person / MedEvac casualty (ground) | `Soldier M4` |
 | `CIVIL Casualty …` | battlefield CASEVAC casualty (ground) | `Soldier M4` |
 | `CIVIL Boat …` | sea SAR target (ship) | `ZWEZDNY` |
+| `CIVIL Vessel …` | spawned rescue boat (ship) | `speedboat` |
 | `CIVIL SWAT Team …` | SWAT squad (ground; unit count scaled at insertion) | `Soldier M4` |
 | `CIVIL Fugitive …` | fleeing car (vehicle) | `LandRover_ah` |
 
@@ -82,8 +84,15 @@ types. Group-name prefix matching:
 
 | Prefix | Matched on | Behavior |
 |---|---|---|
-| `CIVIL Rescue Vessel …` | GROUP name | when a sea SAR starts, the nearest free vessels (up to `rescue.vessels.perEvent`) steam toward the APPROXIMATE search area; once a spotter identifies the subject they steer to the exact point. Narrative/scenic: the extraction is still the helicopter's job |
-| `CIVIL Hospital Ship …` | UNIT name | the ship's current position acts as a MOBILE delivery pad: casualty delivery is detected relative to the ship (distance, deck height band, RELATIVE speed — works while the ship is underway). Intended for big-ship mods with landable decks: deck landing TO TEST in-game |
+| `CIVIL Rescue Vessel …` | GROUP name | when a sea SAR starts, the nearest free vessels (up to `rescue.vessels.perEvent`) steam toward the APPROXIMATE search area; once a spotter identifies the subject they steer to the exact point. A vessel holding within 200 m of the subject for 60 s completes a SEA RESCUE: the identifying spotter (C-130) gets the score |
+| `CIVIL Hospital Ship …` | UNIT name | double role: (1) MOBILE delivery pad — casualty delivery detected relative to the ship (distance, deck height band, RELATIVE speed, works while underway; deck landing with big-ship mods TO TEST); (2) MOTHER SHIP — if it is closer to a sea SAR than the harbors, spawned rescue boats launch from it (e.g. a Perry or a Tarawa) |
+
+If fewer pre-placed vessels than `perEvent` are free, stock boats are
+spawned from the nearest origin (mother ship or `CIVIL Vessel Spawn` zone).
+If the helicopter's hover window expires while vessels are en route, the
+subject holds on for ONE extra window before being lost for good — the
+window that lets the "slightly too far" boats arrive and turn a failed
+helicopter rescue into a spotter-credited sea rescue.
 
 ## 5. Minimum configuration review
 
