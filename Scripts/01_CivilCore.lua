@@ -163,8 +163,30 @@ CIV.Config = {
     c130DropSeconds  = 10,      -- line drop duration
     c130DropAGL      = { min = 120, max = 300 },   -- valid AGL band (nominal 150-250 m)
     dropRadius       = 300,     -- m, max distance from a fire for a drop to count
-    c130ReloadTime   = 60,      -- s stationary inside the reload zone
+    c130ReloadTime   = 120,     -- s stationary inside the reload zone after requesting
+                                -- the load via F10 (loading is opt-in: taking off clean
+                                -- and just orbiting as a spotter needs no interaction)
     spotterInterval  = 180,     -- s between spotter reports
+
+    -- Physical cargo airdrop (official C-130 module). The mission scripting
+    -- API cannot read the module's internal cargo bay, so drops are detected
+    -- from the outside through two parallel channels (both TO VALIDATE
+    -- in-game against the official module, since how it exposes airdrops to
+    -- scripting is not documented):
+    --   1. S_EVENT_SHOT: if the module releases containers as weapon
+    --      objects (as the older Hercules mod did), they are matched by
+    --      type-name substring and tracked to impact.
+    --   2. Object scan: world.searchObjects around each active fire; any
+    --      cargo/static object appearing there that was not spawned by this
+    --      template counts as retardant drums on target (one-shot per
+    --      object). Works no matter how the module implements the drop, as
+    --      long as the dropped cargo ends up as a world object.
+    airdrop = {
+      enabled = true,
+      containerTypes = { "Hercules_Container", "Hercules_Cargo", "Container" },
+      amountPerContainer = 0.5,   -- intensity reduction per container on target
+      creditRadius = 8000,        -- m, nearest player airplane within this range gets the score
+    },
     usePhysicalCargo = false,   -- true = spawn a mass Cargo object on water (EXPERIMENTAL, test in ME first)
     waterCargoType   = "uh1h_cargo",
     waterCargoKg     = 1000,

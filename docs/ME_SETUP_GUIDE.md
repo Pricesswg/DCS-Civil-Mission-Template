@@ -117,7 +117,12 @@ config block.
 
 - **Session leaderboard** — shared live score.
 - **Firefighting** — water pickup / drop / active fires.
-- **Firefighting C-130** — line drop (after ground reload).
+- **Firefighting C-130** — loading is opt-in: taking off clean and orbiting
+  as spotter/rescue support needs no interaction. `Load retardant` at the
+  reload zone starts a 2-minute hold (moving aborts it), then `Start line
+  drop` releases along the flight path. Alternatively, airdropped cargo
+  containers landing near an active fire count as retardant drums
+  (detection channels TO VALIDATE with the official C-130 module).
 - **Rescue** — smoke from the subject / active events. Exact rescue
   coordinates appear only after a spotter airplane identifies the subject;
   until then, reports give a rough direction and an approximate search
@@ -137,6 +142,10 @@ config block.
    mass (weigh them by hooking).
 5. "On Road": watch 2-3 full chases on the pool's crossroads.
 6. SWAT: infantry spawn on a rooftop from the pool.
-7. (Only if wanted) `fire.usePhysicalCargo = true`: cargo spawn on water.
-8. (Only if wanted) beacon: `.ogg` file in the .miz and
+7. C-130 airdrop: drop cargo containers from the official module near an
+   active fire and check `dcs.log` to see which detection channel fires
+   (S_EVENT_SHOT weapon vs object scan); adjust
+   `fire.airdrop.containerTypes` if needed.
+8. (Only if wanted) `fire.usePhysicalCargo = true`: cargo spawn on water.
+9. (Only if wanted) beacon: `.ogg` file in the .miz and
    `rescue.sarMountain.beacon.enabled = true`.

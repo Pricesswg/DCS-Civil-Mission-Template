@@ -61,6 +61,14 @@ These match the concept's list; each item ships with an escape route.
 7. **`.ogg` beacon + homing** — finicky as per the concept: off by default.
 8. **`Hold` task to stop the fugitive** — if it does not stop a ground group,
    alternative: a single-point route at the current position.
+9. **C-130 airdrop detection (official module)** — the scripting API cannot
+   read the module's cargo bay, and how the official module exposes airdrops
+   is undocumented. Two parallel detection channels are implemented
+   (`fire.airdrop`): S_EVENT_SHOT weapon tracking (Hercules-mod style) and a
+   `world.searchObjects` scan for foreign cargo objects appearing near
+   active fires. Validate in-game which channel fires and tune
+   `containerTypes`; worst case (drops not visible to scripting at all) the
+   F10 line-drop flow still covers the C-130 role entirely.
 
 ## Corrections / clarifications vs the concept ❌→
 

@@ -240,7 +240,7 @@ end, nil, 10)
 -- C-130 RETARDANT OPS + SPOTTER
 ----------------------------------------------------------------------
 
-local c130State = {}   -- unitName -> { retardant, reloadSince, dropRun }
+local c130State = {}   -- unitName -> { retardant, loading, dropRun }
 
 local function cState(uname)
   c130State[uname] = c130State[uname] or { retardant = false }
@@ -251,34 +251,51 @@ local function isAirplane(info)
   return info.category == Unit.Category.AIRPLANE
 end
 
--- ground reload: stationary inside the reload zone for N seconds
-CIV.schedule(function(_, t)
+-- Ground reload, OPT-IN via F10: nothing happens by just parking in the
+-- reload zone, so a C-130 that only wants to orbit as spotter/rescue
+-- support takes off clean with no interaction. Requesting the load starts
+-- a hold timer; moving before it expires aborts the loading.
+local function stoppedInReloadZone(u)
   local zone = CIV.Zones.byName(C.zones.c130Reload)
-  if not zone then return t + 60 end
-  local now = timer.getTime()
-  CIV.forEachPlayer(function(u, info)
-    if not isAirplane(info) then return end
-    local st = cState(info.unitName)
-    if st.retardant then return end
-    local stopped = (not u:inAir()) and CIV.speed(u:getVelocity()) < 1
-    if stopped and CIV.Zones.contains(zone, u:getPoint()) then
-      if not st.reloadSince then
-        st.reloadSince = now
-        CIV.msgUnit(u, "Retardant reload in progress: stay put for " ..
-          CF.c130ReloadTime .. " seconds.", 10)
-      elseif now - st.reloadSince >= CF.c130ReloadTime then
-        st.reloadSince = nil
-        st.retardant = true
-        CIV.msgUnit(u, "Retardant loaded. Drop: F10 -> Civil Missions -> " ..
-          "Firefighting C-130 -> Start line drop (altitude " ..
-          CF.c130DropAGL.min .. "-" .. CF.c130DropAGL.max .. " m AGL).", 15)
-      end
-    else
-      st.reloadSince = nil
+  if not zone then return false end
+  return (not u:inAir()) and CIV.speed(u:getVelocity()) < 1
+    and CIV.Zones.contains(zone, u:getPoint())
+end
+
+local function loadRetardant(uname)
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local st = cState(uname)
+  if st.retardant then
+    CIV.msgUnit(u, "Retardant already aboard.", 10)
+    return
+  end
+  if st.loading then
+    CIV.msgUnit(u, "Loading already in progress: stay put.", 10)
+    return
+  end
+  if not stoppedInReloadZone(u) then
+    CIV.msgUnit(u, "You must be LANDED and stationary inside the " ..
+      C.zones.c130Reload .. " zone.", 10)
+    return
+  end
+  st.loading = true
+  CIV.msgUnit(u, "Loading retardant drums: stay put for " ..
+    CF.c130ReloadTime .. " seconds.", 12)
+  CIV.schedule(function()
+    st.loading = false
+    local u2 = Unit.getByName(uname)
+    if not u2 or not u2:isExist() then return end
+    if not stoppedInReloadZone(u2) then
+      CIV.msgUnit(u2, "Loading aborted: you moved before the drums were secured.", 10)
+      return
     end
-  end)
-  return t + 5
-end, nil, 10)
+    st.retardant = true
+    CIV.msgUnit(u2, "Retardant loaded. Drop: F10 -> Civil Missions -> " ..
+      "Firefighting C-130 -> Start line drop (altitude " ..
+      CF.c130DropAGL.min .. "-" .. CF.c130DropAGL.max .. " m AGL).", 15)
+  end, nil, CF.c130ReloadTime)
+end
 
 local function startLineDrop(uname)
   local u = Unit.getByName(uname)
@@ -341,6 +358,117 @@ CIV.schedule(function(_, t)
   return t + 1
 end, nil, 10)
 
+----------------------------------------------------------------------
+-- CARGO AIRDROP (official C-130 module)
+-- The mission API cannot read the module's cargo bay, so drops are
+-- detected from the outside through two parallel channels; which one the
+-- official module actually triggers is TO VALIDATE in-game:
+--   1. S_EVENT_SHOT weapon objects (Hercules-mod style), tracked to impact
+--   2. world.searchObjects scan: any foreign cargo/static object appearing
+--      near an active fire counts as retardant drums (one-shot per object)
+----------------------------------------------------------------------
+
+if CF.airdrop.enabled then
+  local trackedDrops = {}
+  local processedObjects = {}   -- object name -> true (channel 2 dedupe)
+
+  -- credit the drop to the nearest player airplane within creditRadius
+  local function creditPlayer(impact)
+    local best, bestDist = nil, CF.airdrop.creditRadius
+    CIV.forEachPlayer(function(u, info)
+      if info.category ~= Unit.Category.AIRPLANE then return end
+      local d = CIV.dist2D(u:getPoint(), impact)
+      if d < bestDist then best, bestDist = info, d end
+    end)
+    return best
+  end
+
+  local function retardantOnTarget(impact, playerInfo)
+    local fire = Fire.applyWater(impact, CF.airdrop.amountPerContainer,
+      playerInfo and playerInfo.playerName)
+    if fire and playerInfo then
+      CIV.Score.award(playerInfo.playerName, "fireC130",
+        Fire._fires[fire.id] and 0.6 or 1.0, 0.5, 1, "retardant airdrop")
+    end
+    return fire
+  end
+
+  ------------------------------------------------------------------
+  -- Channel 1: containers released as weapon objects
+  ------------------------------------------------------------------
+  local function isContainer(typeName)
+    for _, pattern in ipairs(CF.airdrop.containerTypes) do
+      if string.find(typeName, pattern, 1, true) then return true end
+    end
+    return false
+  end
+
+  local airdropHandler = {}
+  function airdropHandler:onEvent(event)
+    if event.id ~= world.event.S_EVENT_SHOT or not event.weapon then return end
+    local ok, typeName = pcall(function() return event.weapon:getTypeName() end)
+    if not ok or not typeName or not isContainer(typeName) then return end
+    local shooterName = nil
+    if event.initiator then
+      local ok2, n = pcall(function() return event.initiator:getName() end)
+      if ok2 then shooterName = n end
+    end
+    trackedDrops[#trackedDrops + 1] = { w = event.weapon, shooter = shooterName }
+    CIV.dbg("Airdrop container released: " .. typeName)
+  end
+  world.addEventHandler(airdropHandler)
+
+  CIV.schedule(function(_, t)
+    for i = #trackedDrops, 1, -1 do
+      local drop = trackedDrops[i]
+      local landed = false
+      local ok, p = pcall(function() return drop.w:getPoint() end)
+      if ok and p then
+        drop.lastPos = p
+        if CIV.agl(p) < 3 then landed = true end
+      else
+        landed = true   -- object gone: use the last known position as impact
+      end
+      if landed then
+        table.remove(trackedDrops, i)
+        if drop.lastPos then
+          local info = drop.shooter and CIV.players[drop.shooter]
+          retardantOnTarget(drop.lastPos, info or creditPlayer(drop.lastPos))
+        end
+      end
+    end
+    return t + 1
+  end, nil, 5)
+
+  ------------------------------------------------------------------
+  -- Channel 2: foreign cargo/static objects appearing near active fires.
+  -- Everything spawned by this template is named "CIVIL_*" and skipped.
+  ------------------------------------------------------------------
+  CIV.schedule(function(_, t)
+    if not (world.searchObjects and world.VolumeType and Object and Object.Category) then
+      return t + 60
+    end
+    for _, fire in pairs(Fire.actives()) do
+      local volume = { id = world.VolumeType.SPHERE,
+                       params = { point = fire.point, radius = CF.dropRadius } }
+      pcall(world.searchObjects, Object.Category.STATIC, volume, function(obj)
+        local ok, name = pcall(function() return obj:getName() end)
+        if ok and name and not processedObjects[name]
+           and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
+          processedObjects[name] = true
+          CIV.dbg("Foreign cargo object near fire: " .. tostring(name))
+          local ok2, p = pcall(function() return obj:getPoint() end)
+          if ok2 and p then
+            retardantOnTarget(p, creditPlayer(p))
+          end
+        end
+        return true
+      end)
+    end
+    return t + 5
+  end, nil, 10)
+end
+
 -- spotter: any player airplane inside the fire region relays fire intel
 CIV.schedule(function(_, t)
   local region = CIV.Zones.byName(C.zones.fireRegion)
@@ -388,7 +516,14 @@ CIV.Menu_register(function(gid, uname)
     CIV.msgGroupId(gid, n > 0 and txt or "No active fires.", 20)
   end)
   local c130Sub = missionCommands.addSubMenuForGroup(gid, "Firefighting C-130", CIV.rootMenu[gid])
+  missionCommands.addCommandForGroup(gid, "Load retardant (at reload zone)", c130Sub, loadRetardant, uname)
   missionCommands.addCommandForGroup(gid, "Start line drop", c130Sub, startLineDrop, uname)
+  missionCommands.addCommandForGroup(gid, "Retardant status", c130Sub, function()
+    local st = cState(uname)
+    local txt = st.retardant and "Retardant aboard."
+      or (st.loading and "Loading in progress: stay put." or "No retardant aboard.")
+    CIV.msgGroupId(gid, txt, 10)
+  end)
 end)
 
 CIV.EventStarters.fire = { label = "Wildfire", fn = Fire.igniteRandom }
