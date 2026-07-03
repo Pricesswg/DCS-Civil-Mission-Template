@@ -238,14 +238,43 @@ CIV.Config = {
   },
 
   ------------------------------------------------------------------
-  -- F10 map drawing for active events (CSAR-style circles)
+  -- F10 map drawing. Colors are { r, g, b, alpha } with 0..1 values.
+  -- Circular zones are drawn with circleToAll; polygon zones with
+  -- markupToAll (freeform shape), so the real perimeter is shown.
   ------------------------------------------------------------------
   marks = {
     drawCircles = true,
-    circleRadiusM = 1852,                      -- 1 NM
-    borderColor = { 0, 0, 1, 0.5 },
+    circleRadiusM = 1852,                      -- 1 NM (rescue approximate circle default)
+    borderColor = { 0, 0, 1, 0.5 },            -- rescue approximate search circle
     fillColor   = { 0, 0, 1, 0.15 },
     lineType    = 2,                           -- dashed
+
+    -- Theme-area overlays drawn once at mission start, so players can see
+    -- roughly where each mission type lives. zoneKey references
+    -- CIV.Config.zones; missing zones are skipped silently.
+    regions = {
+      enabled = true,
+      list = {
+        { zoneKey = "fireRegion",        label = "Firefighting area", border = { 1, 0.4, 0, 0.5 },   fill = { 1, 0.4, 0, 0.05 } },
+        { zoneKey = "sarMountainRegion", label = "SAR mountain area", border = { 0, 0.5, 1, 0.5 },   fill = { 0, 0.5, 1, 0.05 } },
+        { zoneKey = "sarSeaRegion",      label = "SAR sea area",      border = { 0, 0.8, 0.8, 0.5 }, fill = { 0, 0.8, 0.8, 0.05 } },
+        { zoneKey = "c130Reload",        label = "C-130 reload",      border = { 1, 1, 0, 0.6 },     fill = { 1, 1, 0, 0.08 } },
+        { zoneKey = "cargoDestination",  label = "Cargo destination", border = { 0, 0.8, 0, 0.6 },   fill = { 0, 0.8, 0, 0.08 } },
+        { zoneKey = "swatBase",          label = "SWAT base",         border = { 0.6, 0, 0.8, 0.6 }, fill = { 0.6, 0, 0.8, 0.08 } },
+      },
+    },
+
+    -- Active-event zone highlighting: the event's own zone perimeter is
+    -- drawn while the event is running and removed when it ends. Rescue
+    -- events deliberately keep the approximate off-center circle instead
+    -- (intel model: exact position needs a spotter).
+    events = {
+      enabled   = true,
+      fire      = { border = { 1, 0, 0, 0.8 },     fill = { 1, 0, 0, 0.12 } },
+      transport = { border = { 0, 0.8, 0, 0.8 },   fill = { 0, 0.8, 0, 0.10 } },
+      swat      = { border = { 0.6, 0, 0.8, 0.8 }, fill = { 0.6, 0, 0.8, 0.10 } },
+      chase     = { border = { 0, 0.4, 1, 0.8 },   fill = { 0, 0.4, 1, 0.10 } },
+    },
   },
 }
 
@@ -688,6 +717,42 @@ end
 
 function CIV.unmark(id)
   if id then pcall(trigger.action.removeMark, id) end
+end
+
+-- Draw the actual perimeter of a scanned zone on the F10 map: circleToAll
+-- for circular zones, markupToAll freeform shape (id 7) for polygon zones
+-- (falls back to the bounding circle if markupToAll is unavailable).
+-- colors = { border = {r,g,b,a}, fill = {r,g,b,a} }. Returns mark id or nil.
+function CIV.drawZoneOutline(area, label, colors, lineType)
+  if not area then return nil end
+  local id = CIV.nextMarkId()
+  lineType = lineType or CIV.Config.marks.lineType
+  local coa = CIV.Config.coalition
+  if area.kind == "polygon" and trigger.action.markupToAll and #area.vertices >= 3 then
+    local args = { 7, coa, id }   -- 7 = freeform polygon
+    for _, v in ipairs(area.vertices) do
+      args[#args + 1] = { x = v.x, y = 0, z = v.z }
+    end
+    args[#args + 1] = colors.border
+    args[#args + 1] = colors.fill
+    args[#args + 1] = lineType
+    args[#args + 1] = true        -- read only
+    args[#args + 1] = label
+    local ok = pcall(function() trigger.action.markupToAll(unpack(args)) end)
+    if ok then return id end
+  end
+  local center = { x = area.center.x, y = 0, z = area.center.z }
+  local ok = pcall(trigger.action.circleToAll, coa, id, center, area.radius,
+    colors.border, colors.fill, lineType, true, label)
+  if ok then return id end
+  return nil
+end
+
+-- Active-event zone highlight (colored by event kind, see marks.events)
+function CIV.drawEventZone(area, label, kind)
+  local cfg = CIV.Config.marks.events
+  if not cfg.enabled or not cfg[kind] then return nil end
+  return CIV.drawZoneOutline(area, label, cfg[kind])
 end
 
 ----------------------------------------------------------------------
@@ -1143,6 +1208,20 @@ CIV.schedule(function()
     CIV.Dressing.spawn(pt.name, "medical_camp")
   end
 end, nil, 5)
+
+-- theme-area overlays on the F10 map (regions, reload, destination, base)
+CIV.schedule(function()
+  local cfg = CIV.Config.marks.regions
+  if not cfg.enabled then return end
+  for _, entry in ipairs(cfg.list) do
+    local zoneName = CIV.Config.zones[entry.zoneKey]
+    local area = zoneName and CIV.Zones.byName(zoneName)
+    if area then
+      CIV.drawZoneOutline(area, entry.label,
+        { border = entry.border, fill = entry.fill })
+    end
+  end
+end, nil, 4)
 
 -- preload pools so dcs.log immediately shows what is defined in ME
 CIV.schedule(function()

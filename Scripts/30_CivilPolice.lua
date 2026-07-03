@@ -92,10 +92,13 @@ function PL.startChase()
   }
   PL._chases[chase.id] = chase
   CIV.Pool.occupy(start)
+  chase.zoneMarkId = CIV.drawEventZone(start.area,
+    "Police chase #" .. chase.id .. " last report", "chase")
   CIV.schedule(function() assignRoute(chase) end, nil, 2)
 
   CIV.msgAll("POLICE: fleeing vehicle reported near " .. start.name ..
     "\n" .. CIV.coordText(start.point) ..
+    "\nLast reported area highlighted on the F10 map." ..
     "\nKeep helicopter contact on the vehicle to build up pressure.", 25)
   CIV.log("Chase #" .. chase.id .. " started at " .. start.name)
   return chase
@@ -103,6 +106,7 @@ end
 
 local function closeChase(chase, despawnAfter)
   CIV.Pool.release(chase.startPt)
+  CIV.unmark(chase.zoneMarkId)
   PL._chases[chase.id] = nil
   local gname = chase.gname
   CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 60)
@@ -229,7 +233,7 @@ function SW.startScenario()
   local scen = { id = SW._sid, pt = pt }
   SW._scenarios[scen.id] = scen
   CIV.Pool.occupy(pt)
-  scen.circleId = CIV.markCircle(pt.point, "SWAT objective #" .. scen.id)
+  scen.circleId = CIV.drawEventZone(pt.area, "SWAT objective #" .. scen.id, "swat")
 
   local hp = C.hover.fastRope
   scen.watch = CIV.Hover.watch({

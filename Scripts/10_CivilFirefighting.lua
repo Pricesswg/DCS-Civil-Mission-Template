@@ -62,7 +62,9 @@ function Fire.ignite(pt)
   trigger.action.effectSmokeBig(fire.point, fire.preset, 0.7, fire.smokeName)
   Fire._fires[fire.id] = fire
   CIV.Pool.occupy(pt)
-  CIV.msgAll("WILDFIRE reported at " .. pt.name .. "\n" .. CIV.coordText(fire.point), 20)
+  fire.zoneMarkId = CIV.drawEventZone(pt.area, "WILDFIRE " .. pt.name, "fire")
+  CIV.msgAll("WILDFIRE reported at " .. pt.name .. "\n" .. CIV.coordText(fire.point) ..
+    "\nFire zone highlighted on the F10 map.", 20)
   CIV.log("Fire #" .. fire.id .. " ignited at " .. pt.name)
   return fire
 end
@@ -77,6 +79,7 @@ end
 local function extinguish(fire, byWhom)
   trigger.action.effectSmokeStop(fire.smokeName)
   CIV.unmark(fire.markId)
+  CIV.unmark(fire.zoneMarkId)
   CIV.Pool.release(fire.pt)
   Fire._fires[fire.id] = nil
   CIV.msgAll("Fire at " .. fire.pt.name .. " EXTINGUISHED" ..

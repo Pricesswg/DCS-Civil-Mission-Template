@@ -93,7 +93,25 @@ At the top of `01_CivilCore.lua` (`CIV.Config`):
   `enabled = false` and start everything from the Admin menu).
 - `adminMenu = false` for official events.
 
-## 6. In game
+## 6. F10 map overlays
+
+Two layers are drawn automatically (configurable in `CIV.Config.marks`):
+
+- **Theme areas** (mission start): the macro-regions and fixed zones are
+  outlined with faint colors so players know where each mission type lives —
+  firefighting (orange), SAR mountain (blue), SAR sea (teal), C-130 reload
+  (yellow), cargo destination (green), SWAT base (purple). Polygon zones are
+  drawn with their real perimeter (`markupToAll`), circular ones as circles.
+- **Active events**: while an event is running, its own zone is highlighted
+  and removed when it ends — wildfire (red), cargo pickup (green), SWAT
+  objective (purple), chase last-report area (blue). Rescue events keep the
+  approximate off-center search circle instead (intel model).
+
+Set `marks.regions.enabled = false` or `marks.events.enabled = false` to
+turn either layer off; colors are `{ r, g, b, alpha }` tables in the same
+config block.
+
+## 7. In game
 
 `F10 → Civil Missions` menu:
 
@@ -108,7 +126,7 @@ At the top of `01_CivilCore.lua` (`CIV.Config`):
 - **Cargo transport** — change tier of the nearby point / active points.
 - **Admin (test)** — manual start of every event, pool status.
 
-## 7. In-game test checklist (before serious use)
+## 8. In-game test checklist (before serious use)
 
 1. Pools and menus: start every event from the Admin menu and check
    messages/spawns.

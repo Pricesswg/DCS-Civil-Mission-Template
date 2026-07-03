@@ -84,6 +84,14 @@ These match the concept's list; each item ships with an escape route.
 - **Spawn country**: spawns run under **CJTF Blue** (combined faction, no
   per-country unit restrictions). CJTF Blue must be added to the blue
   coalition in the ME.
+- **F10 map zone coloring**: natively supported — `circleToAll` for circular
+  zones and `markupToAll` (freeform shape 7, one point per vertex) for the
+  real perimeter of polygon zones, both per-coalition with border + fill
+  colors and removable with `removeMark`. Implemented as two layers: static
+  theme-area overlays at mission start and per-event zone highlighting while
+  an event is active (`CIV.Config.marks.regions` / `marks.events`).
+  `markupToAll` calls run in `pcall` with a bounding-circle fallback for
+  older DCS versions.
 - **Rescue intel model (v0.2 change)**: exact coordinates are never
   broadcast automatically. Initial report = rough direction (distance
   rounded to 5 km + cardinal) from the scenario region (or nearest hospital)

@@ -71,11 +71,20 @@ function CG.startPoint(forcedTier)
   }
   CG._points[point.id] = point
   CIV.Pool.occupy(pt)
+  point.zoneMarkId = CIV.drawEventZone(pt.area,
+    "Cargo pickup " .. pt.name .. " (" .. tier .. ")", "transport")
   CIV.msgAll(string.format(
-    "TRANSPORT: %s load (%d kg) available at %s\n%s\nDestination: %s",
+    "TRANSPORT: %s load (%d kg) available at %s\n%s\nDestination: %s " ..
+    "(pickup zone highlighted on the F10 map)",
     tier, CC.tiers[tier].kg, pt.name, CIV.coordText(pt.point),
     C.zones.cargoDestination), 25)
   return point
+end
+
+local function closePoint(point)
+  CIV.unmark(point.zoneMarkId)
+  CIV.Pool.release(point.pt)
+  CG._points[point.id] = nil
 end
 
 ----------------------------------------------------------------------
@@ -170,8 +179,7 @@ CIV.schedule(function(_, t)
       if not s then
         -- cargo destroyed (dropped/broken): event closed without points
         CIV.msgAll("TRANSPORT: load at " .. point.pt.name .. " LOST.", 12)
-        CIV.Pool.release(point.pt)
-        CG._points[id] = nil
+        closePoint(point)
       else
         local p = s:getPoint()
         if CIV.Zones.contains(dest, p) and CIV.agl(p) < 5
@@ -189,8 +197,7 @@ CIV.schedule(function(_, t)
               C.score.tierMult[point.tier], point.tier .. " transport")
           end
           CIV.despawnStatic(point.cargoName)
-          CIV.Pool.release(point.pt)
-          CG._points[id] = nil
+          closePoint(point)
         end
       end
     end
