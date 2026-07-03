@@ -72,6 +72,7 @@ CIV.Config = {
     cargoPoints       = "CIVIL Cargo Point",
     cargoDestination  = "CIVIL Cargo Destination",
     medevacPoints     = "CIVIL Medevac Point",
+    casevacPoints     = "CIVIL Casevac Point",        -- battlefield casualty extraction LZs
     hospitals         = "CIVIL Hospital",             -- hospital pads: delivery is ZONE-based, never S_EVENT_LAND
   },
 
@@ -82,6 +83,7 @@ CIV.Config = {
   ------------------------------------------------------------------
   templates = {
     survivor = "CIVIL Survivor",   -- ground group: SAR mountain / medevac casualty
+    casualty = "CIVIL Casualty",   -- ground group: battlefield CASEVAC casualty
     boat     = "CIVIL Boat",       -- ship group: SAR sea target
     swatTeam = "CIVIL SWAT Team",  -- ground group: SWAT squad (unit count from template scaled at spawn)
     fugitive = "CIVIL Fugitive",   -- vehicle group: police chase car
@@ -105,6 +107,7 @@ CIV.Config = {
     sarMountain = { T = 300, window = 1500, B = 2.0, maxSpeed = 2.5, radius = 30, minAGL = 3, maxAGL = 25 },
     sarSea      = { T = 300, window = 1500, B = 2.5, maxSpeed = 2.5, radius = 30, minAGL = 5, maxAGL = 25 },
     medevac     = { T = 240, window = 1200, B = 2.0, maxSpeed = 2.5, radius = 30, minAGL = 3, maxAGL = 25 },
+    casevac     = { T = 240, window = 1200, B = 2.5, maxSpeed = 2.5, radius = 25, minAGL = 3, maxAGL = 25 },
     fastRope    = { T = 90,  window = 900,  B = 3.0, maxSpeed = 2.0, radius = 20, minAGL = 5, maxAGL = 30 },
   },
 
@@ -120,6 +123,7 @@ CIV.Config = {
       sarMountain = 20,
       sarSea      = 25,     -- sea SAR with waves is worth more than flat transport
       medevac     = 20,
+      casevac     = 22,     -- battlefield extraction: hostile setting premium
       chase       = 15,
       swat        = 20,
       transport   = 10,     -- multiplied by the cargo tier
@@ -227,8 +231,41 @@ CIV.Config = {
       maxActive   = 2,
       criticality = 1800,  -- s: the casualty decays in this time; remaining fraction = score quality
     },
+    -- Battlefield CASEVAC: same engine and flow as MedEvac (hover pickup ->
+    -- hospital delivery), hostile-setting skin, tighter criticality.
+    casevac = {
+      maxActive   = 2,
+      criticality = 1500,
+    },
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
+
+    -- AI SAR vessels: ship groups placed in the ME whose GROUP name starts
+    -- with groupPrefix are tasked toward the APPROXIMATE search area when a
+    -- sea SAR event starts (consistent with the intel model: they do not
+    -- know the exact position), and re-tasked to the exact point once a
+    -- spotter identifies the subject. Purely narrative/scenic pressure:
+    -- the extraction is still the helicopter's job.
+    vessels = {
+      enabled = true,
+      groupPrefix = "CIVIL Rescue Vessel",
+      speed = 9,        -- m/s route speed
+      perEvent = 2,     -- vessels dispatched per event (nearest first)
+    },
+
+    -- Mobile landing zone (big-ship mod): ship UNITS whose name starts with
+    -- unitPrefix act as moving hospital pads. Delivery detection is
+    -- relative to the ship: horizontal distance from the unit, altitude
+    -- above the ship reference point within deck bounds, and RELATIVE
+    -- speed (the ship may be underway). Physical deck landing depends on
+    -- the mod's deck collision: TO TEST in-game.
+    hospitalShips = {
+      enabled = true,
+      unitPrefix = "CIVIL Hospital Ship",
+      radius = 80,          -- m horizontal from the ship unit position
+      deckAGLMax = 45,      -- m above the ship reference point (covers tall decks)
+      maxRelSpeed = 2.0,    -- m/s relative to the ship
+    },
 
     -- Intel model (CSAR-style): exact coordinates are NEVER broadcast on
     -- event start. The initial report is a rough direction plus an
@@ -273,6 +310,7 @@ CIV.Config = {
       sarMountain = 25,
       sarSea      = 20,
       medevac     = 25,
+      casevac     = 20,
       chase       = 25,
       swat        = 15,
       transport   = 40,
@@ -449,11 +487,14 @@ end
 
 CIV.Zones = { _areas = {} }        -- list of { name, kind, center={x,z}, radius, vertices?, properties }
 CIV.Templates = { _groups = {} }   -- list of { name, countryId, category, categoryEnum, data }
+CIV.Ships = {}                     -- every ship unit in the mission: { unitName, groupName }
+                                   -- (rescue vessels and mobile hospital ships are found here by prefix)
 CIV._ids = { group = 900000, unit = 900000, mark = 950000 }
 
-local function startsWith(s, prefix)
+function CIV.startsWith(s, prefix)
   return type(s) == "string" and string.sub(s, 1, string.len(prefix)) == prefix
 end
+local startsWith = CIV.startsWith
 
 local function pointInPolygon(point, vertices)
   if not vertices or #vertices < 3 then return false end
@@ -550,6 +591,13 @@ local function loadTemplates()
                       category = cat, categoryEnum = categoryEnum[cat],
                       data = deepCopy(g),
                     }
+                  end
+                  if cat == "ship" and not g.lateActivation and type(g.units) == "table" then
+                    for _, u in pairs(g.units) do
+                      if u.name then
+                        CIV.Ships[#CIV.Ships + 1] = { unitName = u.name, groupName = g.name }
+                      end
+                    end
                   end
                 end
               end
@@ -1369,7 +1417,7 @@ CIV.schedule(function()
   local z = CIV.Config.zones
   for _, prefix in pairs({ z.firePoints, z.waterPoints, z.sarMountainPoints,
       z.sarSeaPoints, z.policePoints, z.swatPoints, z.cargoPoints,
-      z.medevacPoints, z.hospitals }) do
+      z.medevacPoints, z.casevacPoints, z.hospitals }) do
     CIV.Pool.load(prefix)
   end
 end, nil, 3)
@@ -1940,10 +1988,77 @@ local function stopBeacon(evt)
   end
 end
 
+----------------------------------------------------------------------
+-- AI SAR VESSELS
+-- Ship groups placed in the ME (group name prefix rescue.vessels.
+-- groupPrefix) steam toward the APPROXIMATE search area when a sea event
+-- starts — they get the same low-precision intel as the players — and are
+-- re-tasked to the exact point once a spotter identifies the subject.
+----------------------------------------------------------------------
+
+local vesselBusy = {}   -- groupName -> event id currently served
+
+local function taskVessel(gname, point, speed)
+  local g = Group.getByName(gname)
+  if not g then return false end
+  local ok = pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = point.x, y = point.z, type = "Turning Point", speed = speed },
+    } } } })
+  end)
+  return ok
+end
+
+local function dispatchVessels(evt)
+  local vcfg = C.rescue.vessels
+  if not vcfg.enabled then return end
+  local seen, candidates = {}, {}
+  for _, ship in ipairs(CIV.Ships) do
+    local gname = ship.groupName
+    if not seen[gname] and CIV.startsWith(gname, vcfg.groupPrefix)
+       and not vesselBusy[gname] then
+      seen[gname] = true
+      local g = Group.getByName(gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        candidates[#candidates + 1] = {
+          gname = gname, dist = CIV.dist2D(u:getPoint(), evt.approxCenter),
+        }
+      end
+    end
+  end
+  table.sort(candidates, function(a, b) return a.dist < b.dist end)
+  evt.vessels = {}
+  for _, cand in ipairs(candidates) do
+    if #evt.vessels >= vcfg.perEvent then break end
+    if taskVessel(cand.gname, evt.approxCenter, vcfg.speed) then
+      vesselBusy[cand.gname] = evt.id
+      evt.vessels[#evt.vessels + 1] = cand.gname
+    end
+  end
+  if #evt.vessels > 0 then
+    CIV.msgAll(#evt.vessels .. " rescue vessel(s) underway to the search area.", 12)
+  end
+end
+
+local function retaskVessels(evt, point)
+  for _, gname in ipairs(evt.vessels or {}) do
+    taskVessel(gname, point, C.rescue.vessels.speed)
+  end
+end
+
+local function releaseVessels(evt)
+  for _, gname in ipairs(evt.vessels or {}) do
+    vesselBusy[gname] = nil
+  end
+  evt.vessels = nil
+end
+
 local function closeEvent(sc, evt)
   sc.events[evt.id] = nil
   CIV.Pool.release(evt.pt)
   stopBeacon(evt)
+  releaseVessels(evt)
   CIV.unmark(evt.markId)
   CIV.unmark(evt.circleId)
   if evt.gname then CIV.despawnGroup(evt.gname) end
@@ -1988,7 +2103,8 @@ function R.startEvent(key)
   if def.kind == "boat" then
     evt.gname = CIV.spawnBoat(pt.point, "CIVIL_" .. def.key)
   else
-    evt.gname = CIV.spawnGround(pt.point, 1, C.templates.survivor,
+    evt.gname = CIV.spawnGround(pt.point, 1,
+      def.templatePrefix or C.templates.survivor,
       C.fallbackTypes.survivor, "CIVIL_" .. def.key)
   end
   startBeacon(def, evt)
@@ -2001,9 +2117,11 @@ function R.startEvent(key)
   local circleRadius = CIV.randBetween(intel.approxRadius)
   local circleCenter = CIV.offsetPoint(evt.point, math.random(0, 359),
     circleRadius * CIV.randBetween(intel.centerOffset))
+  evt.approxCenter = circleCenter
   evt.circleId = CIV.markCircle(circleCenter,
     def.label .. " #" .. evt.id .. " search area", circleRadius)
   evt.identified = false
+  if def.kind == "boat" then dispatchVessels(evt) end
 
   local refPoint, refName = vagueReference(def, evt.point)
   evt.vagueText = refPoint
@@ -2031,6 +2149,7 @@ function R.startEvent(key)
       CIV.despawnGroup(evt.gname)
       evt.gname = nil
       stopBeacon(evt)
+      releaseVessels(evt)
       table.insert(R.aboardList(unit:getName()), {
         scoreType = def.scoreType, label = def.label, evt = evt,
         quality = def.qualityFn and def.qualityFn(evt, session)
@@ -2061,6 +2180,32 @@ end
 
 local deliveryTimer = {}   -- unitName -> time the valid dwell started
 
+-- Mobile hospital ship check: everything is measured RELATIVE to the ship
+-- unit (it may be underway): horizontal distance, altitude above the ship
+-- reference point within deck bounds, and relative speed.
+local function onHospitalShip(u, p)
+  local hcfg = C.rescue.hospitalShips
+  if not hcfg.enabled then return false end
+  for _, ship in ipairs(CIV.Ships) do
+    if CIV.startsWith(ship.unitName, hcfg.unitPrefix) then
+      local su = Unit.getByName(ship.unitName)
+      if su and su:isExist() then
+        local sp = su:getPoint()
+        if CIV.dist2D(p, sp) <= hcfg.radius then
+          local hv, sv = u:getVelocity(), su:getVelocity()
+          local relSpeed = CIV.speed({ x = hv.x - sv.x, y = hv.y - sv.y, z = hv.z - sv.z })
+          local deckHeight = p.y - sp.y
+          if relSpeed <= hcfg.maxRelSpeed
+             and deckHeight >= -5 and deckHeight <= hcfg.deckAGLMax then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
 CIV.schedule(function(_, t)
   local cd = C.rescue.delivery
   local now = timer.getTime()
@@ -2078,7 +2223,7 @@ CIV.schedule(function(_, t)
         end
         local stillAndLow = CIV.speed(u:getVelocity()) <= cd.maxSpeed
           and CIV.agl(p) <= cd.maxAGL
-        if inHospital and stillAndLow then
+        if (inHospital and stillAndLow) or onHospitalShip(u, p) then
           deliveryTimer[uname] = deliveryTimer[uname] or now
           if now - deliveryTimer[uname] >= cd.holdSeconds then
             deliveryTimer[uname] = nil
@@ -2173,6 +2318,7 @@ CIV.schedule(function(_, t)
         if spotter then
           evt.identified = true
           evt.markId = CIV.mark(sc.def.label .. " #" .. evt.id, evt.point)
+          retaskVessels(evt, evt.point)   -- vessels steer to the exact position
           CIV.msgAll("SPOTTER " .. spotter.playerName .. " has identified the " ..
             sc.def.label .. " #" .. evt.id .. " subject:\n" ..
             CIV.coordText(evt.point) .. "\nExact position marked on the F10 map.", 20)
@@ -2216,6 +2362,22 @@ R.newScenario({
   end,
 })
 
+-- Battlefield casualty extraction: same flow as MedEvac (the concept
+-- anticipated this reuse: same scheme, hostile narrative skin), with its
+-- own LZ pool, casualty template, tighter criticality and score premium.
+R.newScenario({
+  key = "CASEVAC", label = "Battlefield CASEVAC", kind = "ground",
+  poolPrefix = C.zones.casevacPoints, region = nil,
+  maxActive = C.rescue.casevac.maxActive, beacon = nil,
+  templatePrefix = C.templates.casualty,
+  scoreType = "casevac", hoverCfg = C.hover.casevac,
+  deadline = C.rescue.casevac.criticality,
+  qualityFn = function(evt)
+    local left = evt.deadline - timer.getTime()
+    return math.max(0, math.min(1, left / C.rescue.casevac.criticality))
+  end,
+})
+
 ----------------------------------------------------------------------
 -- F10 MENU + EVENT STARTERS
 ----------------------------------------------------------------------
@@ -2244,6 +2406,8 @@ CIV.EventStarters.sarSea = { label = "SAR Sea",
   fn = function() return R.startEvent("SAR_SEA") end }
 CIV.EventStarters.medevac = { label = "MedEvac",
   fn = function() return R.startEvent("MEDEVAC") end }
+CIV.EventStarters.casevac = { label = "Battlefield CASEVAC",
+  fn = function() return R.startEvent("CASEVAC") end }
 
 CIV.log("CivilRescue loaded")
 

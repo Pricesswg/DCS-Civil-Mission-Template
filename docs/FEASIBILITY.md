@@ -61,7 +61,18 @@ These match the concept's list; each item ships with an escape route.
 7. **`.ogg` beacon + homing** — finicky as per the concept: off by default.
 8. **`Hold` task to stop the fugitive** — if it does not stop a ground group,
    alternative: a single-point route at the current position.
-9. **C-130 airdrop detection (official module)** — the scripting API cannot
+9. **Hospital-ship deck landing (big-ship mods)** — delivery detection is
+    measured relative to the ship (horizontal distance, deck height band,
+    relative speed), so it works even while the ship is underway; but the
+    PHYSICAL deck landing depends on the mod's deck collision mesh, exactly
+    like the rooftop case: TO TEST with the chosen mod. If the deck is not
+    landable, a stable low hover over the deck also satisfies the check.
+10. **AI vessel routing on open water** — vessels get a single waypoint
+    toward the search area; ship pathfinding on open water is generally
+    reliable (no known "On Road"-class bug), but shallow water or islands
+    between vessel and target can stall them: place rescue vessels with a
+    clear run to the SAR sea regions.
+11. **C-130 airdrop detection (official module)** — the scripting API cannot
    read the module's cargo bay, and how the official module exposes airdrops
    is undocumented. Two parallel detection channels are implemented
    (shared `CIV.Airdrop` consumer system): S_EVENT_SHOT weapon tracking

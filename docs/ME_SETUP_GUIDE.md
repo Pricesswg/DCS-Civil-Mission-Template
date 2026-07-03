@@ -59,6 +59,7 @@ properties are read from `env.mission`.
 | `CIVIL Cargo Point …` | cargo loading points | flat ground |
 | `CIVIL Cargo Destination` | cargo delivery | single destination zone |
 | `CIVIL Medevac Point …` | casualty recovery | "hostile"/accident LZs |
+| `CIVIL Casevac Point …` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin) |
 | `CIVIL Hospital …` | hospital pads | on the actual pad; dressed with the medical camp kit; delivery is ZONE-detected (still+low), no FARP needed |
 
 Prefixes are configurable in `CIV.Config.zones` (top of `01_CivilCore.lua`).
@@ -72,9 +73,17 @@ types. Group-name prefix matching:
 | Group prefix | Use | Fallback if absent |
 |---|---|---|
 | `CIVIL Survivor …` | mountain SAR missing person / MedEvac casualty (ground) | `Soldier M4` |
+| `CIVIL Casualty …` | battlefield CASEVAC casualty (ground) | `Soldier M4` |
 | `CIVIL Boat …` | sea SAR target (ship) | `ZWEZDNY` |
 | `CIVIL SWAT Team …` | SWAT squad (ground; unit count scaled at insertion) | `Soldier M4` |
 | `CIVIL Fugitive …` | fleeing car (vehicle) | `LandRover_ah` |
+
+## 4b. Ships (regular units placed in the ME, matched by name prefix)
+
+| Prefix | Matched on | Behavior |
+|---|---|---|
+| `CIVIL Rescue Vessel …` | GROUP name | when a sea SAR starts, the nearest free vessels (up to `rescue.vessels.perEvent`) steam toward the APPROXIMATE search area; once a spotter identifies the subject they steer to the exact point. Narrative/scenic: the extraction is still the helicopter's job |
+| `CIVIL Hospital Ship …` | UNIT name | the ship's current position acts as a MOBILE delivery pad: casualty delivery is detected relative to the ship (distance, deck height band, RELATIVE speed — works while the ship is underway). Intended for big-ship mods with landable decks: deck landing TO TEST in-game |
 
 ## 5. Minimum configuration review
 
@@ -126,7 +135,8 @@ config block.
 - **Rescue** — smoke from the subject / active events. Exact rescue
   coordinates appear only after a spotter airplane identifies the subject;
   until then, reports give a rough direction and an approximate search
-  circle on the F10 map.
+  circle on the F10 map. Covers SAR mountain/sea, MedEvac and battlefield
+  CASEVAC; delivery works at hospital pads and on hospital ships.
 - **Police / SWAT** — board team / team status.
 - **Cargo transport** — change tier of the nearby point / active points.
   Supply crates airdropped from the C-130 into `CIVIL Cargo Destination`
