@@ -5,84 +5,96 @@ MIST/MOOSE/CTLD da caricare.
 
 ## 1. Caricamento script
 
-Trigger `MISSION START` (o `ONCE / TIME MORE(1)`) con azioni `DO SCRIPT FILE`
-in QUESTO ordine:
+Due opzioni:
+
+**A) File unico (consigliata per l'uso normale)** — un solo trigger
+`MISSION START` con una sola azione `DO SCRIPT FILE`:
 
 ```
-01_CivConfig.lua
-02_CivCore.lua
-03_HoverZoneTrigger.lua
-04_PointPool.lua
-05_ScoreSystem.lua
-06_ZoneDressing.lua
-10_FireZoneManager.lua
-11_Firefighting_Heli.lua
-12_Firefighting_C130.lua
-20_SAR.lua
-30_Polizia_Inseguimento.lua
-31_Polizia_SWAT.lua
-40_Trasporto_Tier.lua
-50_MedEvac.lua
-99_CivMain.lua
+dist/CivilMissionTemplate.lua
 ```
 
-I moduli non usati si possono semplicemente omettere (tranne 01–05 che sono la
-base comune; 06 serve solo se si vogliono le aree arredate). `99_CivMain` va
-sempre per ultimo.
+**B) Modulare (per sviluppo/test)** — 5 azioni `DO SCRIPT FILE` in questo
+ordine (il core per primo, gli altri in qualunque ordine; i moduli non usati
+si possono omettere):
+
+```
+Scripts/01_CivilCore.lua        <- SEMPRE, per primo
+Scripts/10_CivilFirefighting.lua
+Scripts/20_CivilRescue.lua      (SAR montagna/mare + MedEvac)
+Scripts/30_CivilPolice.lua      (inseguimento + SWAT)
+Scripts/40_CivilTransport.lua
+```
+
+Dopo qualunque modifica in `Scripts/`, rigenerare il file unico con
+`tools/build.sh` (o ricopiando a mano i 5 file in sequenza in un unico .lua).
 
 ## 2. Zone da creare in ME
 
-Convenzione: **prefisso + indice a 2 cifre partendo da 01, senza buchi** (la
-scansione si ferma al primo indice mancante). Tutte le zone devono essere
-**circolari** (i vertici delle quad zone non sono leggibili da script nativo).
+Il matching è **per prefisso sul nome** (stile 527th CSAR): qualunque zona il
+cui nome INIZIA con il prefisso appartiene a quel pool — ad es.
+`CIVIL Fire Point Alpha`, `CIVIL Fire Point 12`, `CIVIL Fire Point Bosco`.
+Non serve numerazione consecutiva. Le zone possono essere **circolari o
+poligonali (quad zone)**: vertici e proprietà vengono letti da `env.mission`.
 
-| Zona/e | Uso | Note di piazzamento |
+| Prefisso / nome zona | Uso | Note di piazzamento |
 |---|---|---|
-| `CIV_FUOCO_REGIONE` | macro-regione antincendio | grande, contiene i punti fuoco; abilita spotter e rilascio C-130 |
-| `CIV_FUOCO_P01…` | punti incendio | bosco/campi, lontani da edifici e strade |
-| `CIV_ACQUA_P01…` | prelievo acqua elicotteri | su specchio d'acqua, spazio di manovra |
-| `CIV_C130_RIFORN` | ricarica ritardante C-130 | su piazzale/rullaggio raggiungibile a terra; viene arredata col kit carico |
-| `CIV_SARM_REGIONE` + `CIV_SARM_P01…` | SAR montagna | punti su terreno raggiungibile in hover |
-| `CIV_SARS_REGIONE` + `CIV_SARS_P01…` | SAR mare | punti su acqua APERTA (ci spawna un'imbarcazione) |
-| `CIV_POL_P01…` | inseguimento | 30–40 punti SUGLI INCROCI reali, distanza tra vicini ≤ 1500 m (config `raggioVicini`) |
-| `CIV_SWAT_BASE` | imbarco squadra | piazzale dove l'elicottero può atterrare |
-| `CIV_SWAT_P01…` | scenari SWAT | tetti/LZ urbane (spawn su tetto DA TESTARE) |
-| `CIV_CARGO_P01…` | punti di carico materiale | terreno piano |
-| `CIV_CARGO_DEST` | consegna materiale | zona unica di destinazione |
-| `CIV_MEDEVAC_P01…` | recupero feriti | LZ "ostili"/incidenti |
-| `CIV_OSPEDALE_P01…` | piazzole ospedale | sulla piazzola vera; vengono arredate col kit campo medico; consegna rilevata A ZONA (fermo+basso), non serve FARP |
+| `CIVIL Fire Region` | macro-regione antincendio | grande; abilita spotter e rilascio C-130 |
+| `CIVIL Fire Point …` | punti incendio | bosco/campi, lontani da edifici e strade |
+| `CIVIL Water Point …` | prelievo acqua elicotteri | su specchio d'acqua, spazio di manovra |
+| `CIVIL C130 Reload` | ricarica ritardante C-130 | piazzale raggiungibile a terra; arredata col kit carico |
+| `CIVIL SAR Mountain Region` + `CIVIL SAR Mountain Point …` | SAR montagna | punti raggiungibili in hover |
+| `CIVIL SAR Sea Region` + `CIVIL SAR Sea Point …` | SAR mare | punti su acqua APERTA (ci spawna un'imbarcazione) |
+| `CIVIL Police Point …` | inseguimento | 30–40 punti SUGLI INCROCI reali, distanza tra vicini ≤ 1500 m |
+| `CIVIL SWAT Base` | imbarco squadra | piazzale dove l'elicottero può atterrare |
+| `CIVIL SWAT Point …` | scenari SWAT | tetti/LZ urbane (spawn su tetto DA TESTARE) |
+| `CIVIL Cargo Point …` | punti di carico materiale | terreno piano |
+| `CIVIL Cargo Destination` | consegna materiale | zona unica di destinazione |
+| `CIVIL Medevac Point …` | recupero feriti | LZ "ostili"/incidenti |
+| `CIVIL Hospital …` | piazzole ospedale | sulla piazzola vera; arredate col kit campo medico; consegna rilevata A ZONA (fermo+basso), non serve FARP |
 
-I prefissi sono modificabili in `01_CivConfig.lua` → `CIV.Config.zone`.
+I prefissi sono modificabili in `CIV.Config.zones` (testa di `01_CivilCore.lua`).
 
-## 3. Configurazione minima da rivedere
+## 3. Template di spawn opzionali (stile CSAR Pilot)
 
-In `01_CivConfig.lua`:
+Gruppi **late-activated** piazzati in ME: se esistono, gli spawn vengono
+clonati da lì (unità, skin, country) invece di usare i tipi di fallback
+hardcodati. Matching per prefisso sul nome del gruppo:
+
+| Prefisso gruppo | Uso | Fallback se assente |
+|---|---|---|
+| `CIVIL Survivor …` | disperso SAR montagna / ferito MedEvac (ground) | `Soldier M4` |
+| `CIVIL Boat …` | bersaglio SAR mare (ship) | `ZWEZDNY` |
+| `CIVIL SWAT Team …` | squadra SWAT (ground; il numero di unità viene scalato allo sbarco) | `Soldier M4` |
+| `CIVIL Fugitive …` | auto in fuga (vehicle) | `LandRover_ah` |
+
+## 4. Configurazione minima da rivedere
+
+In testa a `01_CivilCore.lua` (`CIV.Config`):
 
 - `countryId`: un paese presente nella coalizione blu della missione.
-- `capacita`: aggiungere i tipi esatti dei moduli usati dal gruppo
-  (nome tipo DCS, es. `CH-47Fbl1`) con i kg di carico esterno.
-- `cargo.tiers`: kg e tipo cargo per tier (tipo da validare in ME: alcuni
-  cargo hanno massa fissa).
+- `capacity`: tipi esatti dei moduli usati dal gruppo con i kg di carico
+  esterno (l'API non li espone: tabella a mano, valori DA VALIDARE).
+- `cargo.tiers`: kg e tipo cargo per tier (alcuni tipi cargo hanno massa
+  fissa: validare in ME).
 - `hover.*`: tempi T/finestre per tipo di operazione.
-- `director`: probabilità/intervalli della generazione automatica eventi
-  (oppure `abilitato = false` e si avvia tutto dal menu Admin).
+- `director`: probabilità/intervalli della generazione automatica
+  (oppure `enabled = false` e si avvia tutto dal menu Admin).
 - `adminMenu = false` per le serate ufficiali.
 
-## 4. In gioco
+## 5. In gioco
 
-Menu `F10 → Missioni Civili`:
+Menu `F10 → Civil Missions`:
 
-- **Classifica di sessione** — punteggio live condiviso.
-- **Antincendio** — inizia prelievo acqua / sgancia acqua / incendi attivi.
-- **Antincendio C-130** — avvia rilascio in linea (dopo ricarica a terra).
-- **Polizia / SWAT** — imbarca squadra / stato squadra.
-- **Trasporto materiale** — cambia tier del punto vicino / punti attivi.
-- **Admin (test)** — avvio manuale di ogni tipo di evento, stato pool.
+- **Session leaderboard** — punteggio live condiviso.
+- **Firefighting** — prelievo acqua / sgancio / incendi attivi.
+- **Firefighting C-130** — rilascio in linea (dopo ricarica a terra).
+- **Rescue** — fumogeno dal soggetto / eventi attivi.
+- **Police / SWAT** — imbarco squadra / stato squadra.
+- **Cargo transport** — cambio tier del punto vicino / punti attivi.
+- **Admin (test)** — avvio manuale di ogni evento, stato pool.
 
-## 5. Checklist di test in-game (prima dell'uso serio)
-
-Dal concept, sezione "Punti che richiedono test empirico" — in ordine
-suggerito:
+## 6. Checklist di test in-game (prima dell'uso serio)
 
 1. Pool e menu: avviare ogni evento dal menu Admin e verificare messaggi/spawn.
 2. Hover: prelievo acqua + un SAR completo fino alla consegna in ospedale.
@@ -90,6 +102,6 @@ suggerito:
    personalizzata (pesarli agganciandoli).
 4. "On Road": osservare 2–3 inseguimenti interi sugli incroci del pool.
 5. SWAT: spawn fanteria su un tetto del pool.
-6. (Solo se interessa) `fuoco.usaCargoFisico = true`: spawn cargo su acqua.
-7. (Solo se interessa) beacon: mettere il file `.ogg` nella .miz e attivare
-   `sar.montagna.beacon.abilitato`.
+6. (Solo se interessa) `fire.usePhysicalCargo = true`: spawn cargo su acqua.
+7. (Solo se interessa) beacon: file `.ogg` nella .miz e
+   `rescue.sarMountain.beacon.enabled = true`.

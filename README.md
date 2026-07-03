@@ -1,45 +1,53 @@
 # DCS Civil Mission Template
 
-Template modulare per missioni civili in DCS World — antincendio, SAR
-montagna/mare, MedEvac, polizia (inseguimento e SWAT), trasporto materiale a
-tier — in **Lua puro nativo** (nessun MIST/MOOSE/CTLD).
+Modular template for civil missions in DCS World — firefighting, mountain/sea
+SAR, MedEvac, police (chase and SWAT), tiered cargo transport — in **pure
+native Lua** (no MIST/MOOSE/CTLD).
 
-## Struttura
+## Structure
 
 ```
 Scripts/
-  01_CivConfig.lua           Configurazione centrale (zone, tier, capacità, punteggi)
-  02_CivCore.lua             Utility, registro giocatori, messaggi, menu F10
-  03_HoverZoneTrigger.lua    Modulo hover condiviso (T + malus stabilità + finestra)
-  04_PointPool.lua           Macro-regioni + pool di punti curati
-  05_ScoreSystem.lua         Punteggio di sessione (funzione pura + classifica F10)
-  06_ZoneDressing.lua        Aree arredate (campo medico, zona carico C-130, ...)
-  10_FireZoneManager.lua     Incendi: accensione, intensità, fumo/fuoco
-  11_Firefighting_Heli.lua   Antincendio elicotteri (prelievo in hover + sgancio)
-  12_Firefighting_C130.lua   Antincendio C-130 (ricarica a terra + linea) + spotter
-  20_SAR.lua                 Motore SAR generico + istanze Montagna e Mare
-  30_Polizia_Inseguimento.lua  Inseguimento con pressione + watchdog "On Road"
-  31_Polizia_SWAT.lua        Imbarco squadra + inserimento fast-rope
-  40_Trasporto_Tier.lua      Carichi a tier fissi con gate heavy-lift
-  50_MedEvac.lua             Recupero feriti con timer di criticità
-  99_CivMain.lua             Direttore eventi + menu Admin (caricare per ultimo)
+  01_CivilCore.lua          Config + shared systems: mission scanner (zones,
+                            polygon support, late-activated templates), point
+                            pools, player registry, hover trigger, scoring,
+                            scenery kits, event director, admin menu
+  10_CivilFirefighting.lua  Fires, helicopter water ops, C-130 retardant + spotter
+  20_CivilRescue.lua        SAR Mountain, SAR Sea, MedEvac (shared engine)
+  30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
+  40_CivilTransport.lua     Fixed mass tiers with heavy-lift gate
+dist/
+  CivilMissionTemplate.lua  Single-file build (all of the above merged);
+                            regenerate with tools/build.sh after edits
+tools/
+  build.sh                  Concatenates Scripts/ into the single-file build
 docs/
-  CONCEPT.md                 Brief di design (decisioni e verifiche)
-  FATTIBILITA.md             Verifica punto-per-punto concept vs implementazione
-  GUIDA_SETUP_ME.md          Zone da creare in ME, ordine di caricamento, checklist test
+  CONCEPT.md                Design brief (decisions and verifications, Italian)
+  FATTIBILITA.md            Point-by-point feasibility check (Italian)
+  GUIDA_SETUP_ME.md         Mission Editor setup guide (Italian)
 ```
 
 ## Quick start
 
-1. Creare in Mission Editor le zone elencate in `docs/GUIDA_SETUP_ME.md`
-   (convenzione `PREFISSO + 01..N`, zone circolari).
-2. Caricare gli script con `DO SCRIPT FILE` nell'ordine numerico
-   (`99_CivMain.lua` per ultimo).
-3. In gioco: `F10 → Missioni Civili`.
+1. Create the trigger zones listed in `docs/GUIDA_SETUP_ME.md`
+   (name-prefix matching, e.g. `CIVIL Fire Point Alpha`; circular or
+   polygon zones both work).
+2. Load `dist/CivilMissionTemplate.lua` with a single `DO SCRIPT FILE`
+   action at MISSION START (or the five `Scripts/` files in order,
+   `01_CivilCore.lua` first).
+3. In game: `F10 → Civil Missions`.
 
-## Stato
+Optional: place late-activated template groups (`CIVIL Survivor`,
+`CIVIL Boat`, `CIVIL SWAT Team`, `CIVIL Fugitive`) to control exactly what
+gets spawned; hardcoded fallback types are used otherwise.
 
-Struttura iniziale completa e sintatticamente verificata (Lua 5.1) con smoke
-test su mock delle API. **Non ancora testata in DCS**: i punti che richiedono
-test empirico in-game sono elencati in `docs/FATTIBILITA.md` (sezione ⚠️) con
-i relativi fallback già inclusi.
+## Status
+
+Initial structure complete, syntax-checked (Lua 5.1) and smoke-tested against
+a mock of the DCS scripting API — both the modular and the single-file build.
+**Not yet tested inside DCS**: the items that need empirical in-game testing
+are listed in `docs/FATTIBILITA.md` (⚠️ section) together with their
+fallbacks.
+
+Zone/template scanning, polygon area support and several utilities are
+adapted from the 527th CSAR System by {527th} ienatom and {104WW} Price.
