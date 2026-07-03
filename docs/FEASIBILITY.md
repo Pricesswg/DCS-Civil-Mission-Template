@@ -64,11 +64,15 @@ These match the concept's list; each item ships with an escape route.
 9. **C-130 airdrop detection (official module)** — the scripting API cannot
    read the module's cargo bay, and how the official module exposes airdrops
    is undocumented. Two parallel detection channels are implemented
-   (`fire.airdrop`): S_EVENT_SHOT weapon tracking (Hercules-mod style) and a
-   `world.searchObjects` scan for foreign cargo objects appearing near
-   active fires. Validate in-game which channel fires and tune
-   `containerTypes`; worst case (drops not visible to scripting at all) the
-   F10 line-drop flow still covers the C-130 role entirely.
+   (shared `CIV.Airdrop` consumer system): S_EVENT_SHOT weapon tracking
+   (Hercules-mod style) and `world.searchObjects` scans for foreign cargo
+   objects (near active fires for retardant, inside the destination zone
+   for supplies). Differentiated crates: drums/barrels = retardant
+   (`fire.airdrop.containerTypes`), crates = supply delivery
+   (`cargo.airdrop.containerTypes`); until the real type names are
+   validated, `matchAnyObject = true` lets the impact location decide.
+   Worst case (drops not visible to scripting at all) the F10 line-drop
+   flow still covers the C-130 firefighting role entirely.
 
 ## Corrections / clarifications vs the concept ❌→
 

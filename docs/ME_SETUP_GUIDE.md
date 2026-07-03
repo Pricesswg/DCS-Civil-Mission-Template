@@ -129,6 +129,11 @@ config block.
   circle on the F10 map.
 - **Police / SWAT** — board team / team status.
 - **Cargo transport** — change tier of the nearby point / active points.
+  Supply crates airdropped from the C-130 into `CIVIL Cargo Destination`
+  also score as deliveries (differentiated crates: drums/barrels =
+  retardant on fires, crates = supplies at the destination; until the
+  official module's crate type names are validated, `matchAnyObject = true`
+  makes the impact location decide).
 - **Admin (test)** — manual start of every event, pool status.
 
 ## 8. In-game test checklist (before serious use)
@@ -142,10 +147,12 @@ config block.
    mass (weigh them by hooking).
 5. "On Road": watch 2-3 full chases on the pool's crossroads.
 6. SWAT: infantry spawn on a rooftop from the pool.
-7. C-130 airdrop: drop cargo containers from the official module near an
-   active fire and check `dcs.log` to see which detection channel fires
-   (S_EVENT_SHOT weapon vs object scan); adjust
-   `fire.airdrop.containerTypes` if needed.
+7. C-130 airdrop: drop containers from the official module near an active
+   fire AND inside the cargo destination, check `dcs.log` for which
+   detection channel fires (S_EVENT_SHOT weapon vs object scan) and note
+   the crate type names; then fill `fire.airdrop.containerTypes` /
+   `cargo.airdrop.containerTypes` and set `matchAnyObject = false` to
+   enforce the drum-vs-crate separation.
 8. (Only if wanted) `fire.usePhysicalCargo = true`: cargo spawn on water.
 9. (Only if wanted) beacon: `.ogg` file in the .miz and
    `rescue.sarMountain.beacon.enabled = true`.

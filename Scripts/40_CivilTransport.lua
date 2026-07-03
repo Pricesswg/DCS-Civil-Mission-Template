@@ -206,6 +206,72 @@ CIV.schedule(function(_, t)
 end, nil, 20)
 
 ----------------------------------------------------------------------
+-- SUPPLY AIRDROP (official C-130 module, crate type containers)
+-- Differentiated crates: retardant drops use drum/barrel crates on fires
+-- (see 10_CivilFirefighting), supply drops use crates landing INSIDE the
+-- cargo destination zone. Same dual-channel detection via CIV.Airdrop
+-- (channel 1) plus a destination-zone object scan (channel 2). Crate
+-- types and triggering channel TO VALIDATE against the official module.
+----------------------------------------------------------------------
+
+CG.airdropped = 0   -- delivered supply containers (session counter)
+
+if CC.airdrop.enabled then
+  local matchesType = CIV.Airdrop.typeMatcher(CC.airdrop.containerTypes)
+
+  local function supplyDelivered(impact)
+    local dest = CIV.Zones.byName(C.zones.cargoDestination)
+    if not dest or not CIV.Zones.contains(dest, impact) then return false end
+    CG.airdropped = CG.airdropped + 1
+    local playerInfo = CIV.nearestPlayerAirplane(impact, CC.airdrop.creditRadius)
+    if playerInfo then
+      CIV.Score.award(playerInfo.playerName, "transport", 0.7, 0.5,
+        CC.airdrop.scoreMult, "supply airdrop")
+    else
+      CIV.msgAll("TRANSPORT: supply container delivered by airdrop to " ..
+        C.zones.cargoDestination .. ".", 12)
+    end
+    return true
+  end
+
+  CIV.Airdrop.register({
+    key = "supply", matchesType = matchesType,
+    matchAny = CC.airdrop.matchAnyObject,
+    onImpact = function(point) return supplyDelivered(point) end,
+  })
+
+  -- Channel 2: foreign objects appearing inside the destination zone
+  local processedObjects = {}
+  CIV.schedule(function(_, t)
+    if not (world.searchObjects and world.VolumeType and Object and Object.Category) then
+      return t + 60
+    end
+    local dest = CIV.Zones.byName(C.zones.cargoDestination)
+    if not dest then return t + 60 end
+    local center = { x = dest.center.x,
+                     y = land.getHeight({ x = dest.center.x, y = dest.center.z }),
+                     z = dest.center.z }
+    local volume = { id = world.VolumeType.SPHERE,
+                     params = { point = center, radius = dest.radius } }
+    pcall(world.searchObjects, Object.Category.STATIC, volume, function(obj)
+      local ok, name = pcall(function() return obj:getName() end)
+      if ok and name and not processedObjects[name]
+         and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
+        processedObjects[name] = true
+        local okT, typeName = pcall(function() return obj:getTypeName() end)
+        if CC.airdrop.matchAnyObject or (okT and typeName and matchesType(typeName)) then
+          CIV.dbg("Foreign cargo object in destination zone: " .. tostring(name))
+          local ok2, p = pcall(function() return obj:getPoint() end)
+          if ok2 and p then supplyDelivered(p) end
+        end
+      end
+      return true
+    end)
+    return t + 5
+  end, nil, 12)
+end
+
+----------------------------------------------------------------------
 -- F10 MENU + EVENT STARTER
 ----------------------------------------------------------------------
 

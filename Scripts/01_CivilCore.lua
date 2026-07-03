@@ -135,6 +135,19 @@ CIV.Config = {
     heavyLiftMinKg   = 6000,   -- capacity threshold that unlocks the HEAVY_LIFT tier
     maxActive        = 3,
     warnRadius       = 1000,   -- m, "aircraft not suited to this tier" warning radius
+
+    -- Supply airdrop into the cargo destination zone (official C-130
+    -- module): CRATE type containers landing inside CIVIL Cargo Destination
+    -- score as supply deliveries. Same dual-channel detection and the same
+    -- validation caveat as fire.airdrop (differentiated crates: drums for
+    -- retardant, crates for supplies).
+    airdrop = {
+      enabled = true,
+      containerTypes = { "Crate", "Container" },   -- supply crates, TO VALIDATE
+      matchAnyObject = true,     -- accept any foreign object until types are validated
+      scoreMult = 1.0,           -- transport score multiplier per delivered container
+      creditRadius = 8000,       -- m, nearest player airplane gets the score
+    },
   },
 
   -- Aircraft type -> external load capacity (kg). MAINTAINED BY HAND:
@@ -168,22 +181,20 @@ CIV.Config = {
                                 -- and just orbiting as a spotter needs no interaction)
     spotterInterval  = 180,     -- s between spotter reports
 
-    -- Physical cargo airdrop (official C-130 module). The mission scripting
-    -- API cannot read the module's internal cargo bay, so drops are detected
-    -- from the outside through two parallel channels (both TO VALIDATE
-    -- in-game against the official module, since how it exposes airdrops to
-    -- scripting is not documented):
-    --   1. S_EVENT_SHOT: if the module releases containers as weapon
-    --      objects (as the older Hercules mod did), they are matched by
-    --      type-name substring and tracked to impact.
-    --   2. Object scan: world.searchObjects around each active fire; any
-    --      cargo/static object appearing there that was not spawned by this
-    --      template counts as retardant drums on target (one-shot per
-    --      object). Works no matter how the module implements the drop, as
-    --      long as the dropped cargo ends up as a world object.
+    -- Physical retardant airdrop (official C-130 module). See the generic
+    -- airdrop notes in CIV.Airdrop below: drops are detected from outside
+    -- the cargo bay (S_EVENT_SHOT weapon tracking + object scan), both
+    -- channels TO VALIDATE in-game against the official module.
+    -- Differentiated crates: retardant uses DRUM/BARREL type containers,
+    -- supply delivery (cargo.airdrop) uses CRATE type containers. Until the
+    -- module's real type names are validated, matchAnyObject keeps a
+    -- catch-all behavior and the impact LOCATION differentiates (fires vs
+    -- cargo destination); once validated, fill containerTypes and set
+    -- matchAnyObject = false to enforce crate-type separation.
     airdrop = {
       enabled = true,
-      containerTypes = { "Hercules_Container", "Hercules_Cargo", "Container" },
+      containerTypes = { "Barrel", "Drum", "Fuel" },  -- retardant drums, TO VALIDATE
+      matchAnyObject = true,      -- accept any foreign object until types are validated
       amountPerContainer = 0.5,   -- intensity reduction per container on target
       creditRadius = 8000,        -- m, nearest player airplane within this range gets the score
     },
@@ -1025,6 +1036,104 @@ CIV.schedule(function(_, t)
   for _, w in pairs(CIV.Hover._watches) do tickWatch(w) end
   return t + 1
 end, nil, 2)
+
+----------------------------------------------------------------------
+-- AIRDROP TRACKING (official C-130 module)
+-- The mission scripting API cannot read the module's internal cargo bay,
+-- so airdrops are detected from the outside. This is the shared channel-1
+-- implementation: if the module releases containers as weapon objects
+-- (S_EVENT_SHOT, Hercules-mod style), matching containers are tracked to
+-- impact and offered to the registered consumers. Location-based object
+-- scans (channel 2) live in the intervention files, since each scans its
+-- own area (active fires / cargo destination).
+--
+-- Consumers register with:
+--   CIV.Airdrop.register({
+--     key,                       -- log label
+--     matchesType(typeName),     -- crate-type filter for this consumer
+--     matchAny,                  -- accept unmatched types too (validation phase)
+--     onImpact(point, typeName) -> handled,  -- true = impact consumed
+--   })
+-- On impact, consumers are tried in registration order; the impact
+-- location decides which one actually handles it.
+----------------------------------------------------------------------
+
+CIV.Airdrop = { _consumers = {}, _tracked = {} }
+
+function CIV.Airdrop.register(consumer)
+  table.insert(CIV.Airdrop._consumers, consumer)
+end
+
+-- substring matcher factory for containerTypes pattern lists
+function CIV.Airdrop.typeMatcher(patterns)
+  return function(typeName)
+    for _, pattern in ipairs(patterns) do
+      if string.find(typeName, pattern, 1, true) then return true end
+    end
+    return false
+  end
+end
+
+-- nearest player airplane within radius (score attribution for drops)
+function CIV.nearestPlayerAirplane(point, radius)
+  local best, bestDist = nil, radius
+  CIV.forEachPlayer(function(u, info)
+    if info.category ~= Unit.Category.AIRPLANE then return end
+    local d = CIV.dist2D(u:getPoint(), point)
+    if d < bestDist then best, bestDist = info, d end
+  end)
+  return best
+end
+
+local function airdropWorthTracking(typeName)
+  for _, consumer in ipairs(CIV.Airdrop._consumers) do
+    if consumer.matchAny or consumer.matchesType(typeName) then return true end
+  end
+  return false
+end
+
+local airdropHandler = {}
+function airdropHandler:onEvent(event)
+  if event.id ~= world.event.S_EVENT_SHOT or not event.weapon then return end
+  if #CIV.Airdrop._consumers == 0 then return end
+  local ok, typeName = pcall(function() return event.weapon:getTypeName() end)
+  if not ok or not typeName or not airdropWorthTracking(typeName) then return end
+  table.insert(CIV.Airdrop._tracked, { w = event.weapon, typeName = typeName })
+  CIV.dbg("Airdrop container released: " .. typeName)
+end
+world.addEventHandler(airdropHandler)
+
+local function airdropImpact(point, typeName)
+  for _, consumer in ipairs(CIV.Airdrop._consumers) do
+    if consumer.matchAny or consumer.matchesType(typeName) then
+      local ok, handled = pcall(consumer.onImpact, point, typeName)
+      if ok and handled then
+        CIV.dbg("Airdrop impact handled by '" .. consumer.key .. "': " .. typeName)
+        return
+      end
+    end
+  end
+end
+
+CIV.schedule(function(_, t)
+  local tracked = CIV.Airdrop._tracked
+  for i = #tracked, 1, -1 do
+    local drop = tracked[i]
+    local landed = false
+    local ok, p = pcall(function() return drop.w:getPoint() end)
+    if ok and p then
+      drop.lastPos = p
+      if CIV.agl(p) < 3 then landed = true end
+    else
+      landed = true   -- object gone: use the last known position as impact
+    end
+    if landed then
+      table.remove(tracked, i)
+      if drop.lastPos then airdropImpact(drop.lastPos, drop.typeName) end
+    end
+  end
+  return t + 1
+end, nil, 5)
 
 ----------------------------------------------------------------------
 -- SCORE SYSTEM

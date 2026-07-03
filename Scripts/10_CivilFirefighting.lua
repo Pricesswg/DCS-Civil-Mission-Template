@@ -359,91 +359,36 @@ CIV.schedule(function(_, t)
 end, nil, 10)
 
 ----------------------------------------------------------------------
--- CARGO AIRDROP (official C-130 module)
--- The mission API cannot read the module's cargo bay, so drops are
--- detected from the outside through two parallel channels; which one the
--- official module actually triggers is TO VALIDATE in-game:
---   1. S_EVENT_SHOT weapon objects (Hercules-mod style), tracked to impact
---   2. world.searchObjects scan: any foreign cargo/static object appearing
---      near an active fire counts as retardant drums (one-shot per object)
+-- RETARDANT AIRDROP (official C-130 module, drum/barrel type crates)
+-- Channel 1 (S_EVENT_SHOT weapon tracking) is shared: this file only
+-- registers a consumer with CIV.Airdrop. Channel 2 scans for foreign
+-- cargo/static objects appearing near active fires. Crate types and the
+-- triggering channel are TO VALIDATE against the official module.
 ----------------------------------------------------------------------
 
 if CF.airdrop.enabled then
-  local trackedDrops = {}
-  local processedObjects = {}   -- object name -> true (channel 2 dedupe)
+  local matchesType = CIV.Airdrop.typeMatcher(CF.airdrop.containerTypes)
 
-  -- credit the drop to the nearest player airplane within creditRadius
-  local function creditPlayer(impact)
-    local best, bestDist = nil, CF.airdrop.creditRadius
-    CIV.forEachPlayer(function(u, info)
-      if info.category ~= Unit.Category.AIRPLANE then return end
-      local d = CIV.dist2D(u:getPoint(), impact)
-      if d < bestDist then best, bestDist = info, d end
-    end)
-    return best
-  end
-
-  local function retardantOnTarget(impact, playerInfo)
+  local function retardantOnTarget(impact)
+    local playerInfo = CIV.nearestPlayerAirplane(impact, CF.airdrop.creditRadius)
     local fire = Fire.applyWater(impact, CF.airdrop.amountPerContainer,
       playerInfo and playerInfo.playerName)
     if fire and playerInfo then
       CIV.Score.award(playerInfo.playerName, "fireC130",
         Fire._fires[fire.id] and 0.6 or 1.0, 0.5, 1, "retardant airdrop")
     end
-    return fire
+    return fire ~= nil
   end
 
-  ------------------------------------------------------------------
-  -- Channel 1: containers released as weapon objects
-  ------------------------------------------------------------------
-  local function isContainer(typeName)
-    for _, pattern in ipairs(CF.airdrop.containerTypes) do
-      if string.find(typeName, pattern, 1, true) then return true end
-    end
-    return false
-  end
+  CIV.Airdrop.register({
+    key = "fire", matchesType = matchesType,
+    matchAny = CF.airdrop.matchAnyObject,
+    onImpact = function(point) return retardantOnTarget(point) end,
+  })
 
-  local airdropHandler = {}
-  function airdropHandler:onEvent(event)
-    if event.id ~= world.event.S_EVENT_SHOT or not event.weapon then return end
-    local ok, typeName = pcall(function() return event.weapon:getTypeName() end)
-    if not ok or not typeName or not isContainer(typeName) then return end
-    local shooterName = nil
-    if event.initiator then
-      local ok2, n = pcall(function() return event.initiator:getName() end)
-      if ok2 then shooterName = n end
-    end
-    trackedDrops[#trackedDrops + 1] = { w = event.weapon, shooter = shooterName }
-    CIV.dbg("Airdrop container released: " .. typeName)
-  end
-  world.addEventHandler(airdropHandler)
-
-  CIV.schedule(function(_, t)
-    for i = #trackedDrops, 1, -1 do
-      local drop = trackedDrops[i]
-      local landed = false
-      local ok, p = pcall(function() return drop.w:getPoint() end)
-      if ok and p then
-        drop.lastPos = p
-        if CIV.agl(p) < 3 then landed = true end
-      else
-        landed = true   -- object gone: use the last known position as impact
-      end
-      if landed then
-        table.remove(trackedDrops, i)
-        if drop.lastPos then
-          local info = drop.shooter and CIV.players[drop.shooter]
-          retardantOnTarget(drop.lastPos, info or creditPlayer(drop.lastPos))
-        end
-      end
-    end
-    return t + 1
-  end, nil, 5)
-
-  ------------------------------------------------------------------
-  -- Channel 2: foreign cargo/static objects appearing near active fires.
-  -- Everything spawned by this template is named "CIVIL_*" and skipped.
-  ------------------------------------------------------------------
+  -- Channel 2: foreign objects near active fires (template spawns are all
+  -- named "CIVIL_*" and skipped)
+  local processedObjects = {}
   CIV.schedule(function(_, t)
     if not (world.searchObjects and world.VolumeType and Object and Object.Category) then
       return t + 60
@@ -456,10 +401,11 @@ if CF.airdrop.enabled then
         if ok and name and not processedObjects[name]
            and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
           processedObjects[name] = true
-          CIV.dbg("Foreign cargo object near fire: " .. tostring(name))
-          local ok2, p = pcall(function() return obj:getPoint() end)
-          if ok2 and p then
-            retardantOnTarget(p, creditPlayer(p))
+          local okT, typeName = pcall(function() return obj:getTypeName() end)
+          if CF.airdrop.matchAnyObject or (okT and typeName and matchesType(typeName)) then
+            CIV.dbg("Foreign cargo object near fire: " .. tostring(name))
+            local ok2, p = pcall(function() return obj:getPoint() end)
+            if ok2 and p then retardantOnTarget(p) end
           end
         end
         return true
