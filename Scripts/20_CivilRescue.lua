@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- DCS Civil Mission Template — Rescue (SAR Mountain, SAR Sea, MedEvac)
+-- DCS Civil Mission Template - Rescue (SAR Mountain, SAR Sea, MedEvac)
 -- File: 20_CivilRescue.lua  (requires 01_CivilCore.lua)
 --
 -- One generic rescue engine, three scenarios. Beacon/frequency logic and
@@ -81,7 +81,7 @@ end
 -- AI SAR VESSELS
 -- Ship groups placed in the ME (group name prefix rescue.vessels.
 -- groupPrefix) steam toward the APPROXIMATE search area when a sea event
--- starts — they get the same low-precision intel as the players — and are
+-- starts (they get the same low-precision intel as the players) and are
 -- re-tasked to the exact point once a spotter identifies the subject.
 ----------------------------------------------------------------------
 

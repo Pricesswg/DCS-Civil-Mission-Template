@@ -1,4 +1,4 @@
-# DCS Civil Missions — Concept Draft
+# DCS Civil Missions: Concept Draft
 
 Consolidated design brief for the implementation (pure native Lua, no
 MIST/MOOSE/CTLD). Collects the decisions taken, the technical checks done on
@@ -32,11 +32,11 @@ Rules valid for **all** scripts, not just firefighting:
   to statistically level out and becomes unreadable noise; a value fixed for
   the whole duration gives the event a recognizable "character" instead.
 - **Shared hover detection (`HoverZoneTrigger`)**: a single module reused by
-  any operation without a guaranteed clean landing — firefighting water
+  any operation without a guaranteed clean landing: firefighting water
   pickup, mountain SAR, sea SAR, MedEvac in a hostile setting, SWAT insertion
   by fast-rope. Technically it is NOT a task assigned to an AI controller
   (the operating helicopters are player-flown): it is **polling of the player
-  unit's state** — `Unit:getVelocity()` for the speed magnitude,
+  unit's state**: `Unit:getVelocity()` for the speed magnitude,
   `Unit:getPoint()` for position and altitude, zone membership check,
   sustained for a minimum time. The success action (spawn, despawn, state
   change) is mission-specific and passed as a callback, not baked into the
@@ -61,7 +61,7 @@ water pickup, fast-rope).
   patient died, etc.). The window exists precisely to absorb the time lost
   when the hover is imprecise and the timer slows down.
 - **Weather**: wind in DCS already acts on the flight model, so windy
-  conditions make the hover objectively harder **with no extra code** — the
+  conditions make the hover objectively harder **with no extra code**: the
   B malus captures it automatically by measuring the real deviation. Start
   with this passive effect only; do NOT add a scripted weather-based
   tolerance reduction without testing, because added on top of the physical
@@ -92,7 +92,7 @@ water pickup, fast-rope).
 - **Cross-session persistence (OPEN DECISION)**: we do not use the classic
   DCS values (kills/deaths), the metric is entirely our own, so
   `S_EVENT_SCORE` is useless; the problem is **storing** our values. Three
-  options, the choice depends on a requirement still to be fixed — must the
+  options, the choice depends on a requirement still to be fixed: must the
   ranking update **during** the session or is consolidating it **at mission
   end** enough?
   - *Native persistence* (`world.setPersistenceHandler`): commits at the end
@@ -108,7 +108,7 @@ water pickup, fast-rope).
 - **Decision**: dressed areas (refugee camp, forward medical camp, C-130
   loading area) live in a **fixed trigger zone defined in the ME**. Inside
   the zone, scenic static objects are spawned via `coalition.addStaticObject`
-  (native). No trigger zone is created at runtime — no native API exists for
+  (native). No trigger zone is created at runtime: no native API exists for
   it, and none is needed: the zone already exists from the ME.
 - **No runtime flatness check**: since the point is hand-picked in the ME,
   flatness is guaranteed at design time by placing the zone on flat ground.
@@ -155,7 +155,7 @@ water pickup, fast-rope).
 - A C-130 present in the area can act as spotter and pass the coordinates
   down.
 - **Extraction**: same `HoverZoneTrigger` module used for the firefighting
-  water pickup — the helicopter must hold a hover over the missing person's
+  water pickup: the helicopter must hold a hover over the missing person's
   zone for a minimum time. On success: the ground unit representing the
   missing person is despawned (as if loaded aboard) and the helicopter's
   state records the rescue. On delivery to the hospital no person needs to be
@@ -178,7 +178,7 @@ water pickup, fast-rope).
   water), so the technical risk here is low. Same despawn-on-success logic
   as mountain SAR.
 
-## Police — Chase
+## Police: Chase
 
 - Pool of 30-40 points placed on the real crossroads of a city area
   (close-range macro-region).
@@ -195,14 +195,14 @@ water pickup, fast-rope).
 - State kept per unit/group to support several parallel chases in the same
   city.
 
-## Police — SWAT
+## Police: SWAT
 
 - Team boarding, drop-off on rooftops/buildings for robbery/hostage style
   scenarios.
 - Precision landing on rooftops is unreliable on many building meshes
   (gear/skids without clean collision). No real touchdown is used: insertion
   is by **fast-rope**, the same `HoverZoneTrigger` module already used for
-  firefighting/SAR/MedEvac — helicopter hovering over the rooftop/LZ for a
+  firefighting/SAR/MedEvac: helicopter hovering over the rooftop/LZ for a
   minimum time, then scripted spawn of the team on the ground (no native
   fast-rope equivalent exists in DCS, so it stays virtual state like the
   C-130's retardant).
@@ -219,21 +219,21 @@ water pickup, fast-rope).
   infantry group via `coalition.addGroup` in pure Lua (no external framework
   dependency) when the hover completes.
 
-## Civil cargo transport — Tier system
+## Civil cargo transport: Tier system
 
 - Same zone logic already validated elsewhere: macro-region + pool of curated
   loading points, with random generation of the active point.
 - **Fixed mass tiers** (light / medium / heavy + a dedicated heavy-lift
   tier), not recomputed based on the vehicle that selects them: a real
   physical load (beam, pallet of bricks) has an objective mass independent of
-  who lifts it, unlike water which can be dosed in flight — relative bands
+  who lifts it, unlike water which can be dosed in flight: relative bands
   would have been inconsistent with the simulation fiction.
 - **Label based on the required capacity threshold** ("requires heavy-lift
   aircraft"), not on the specific aircraft name: avoids adding a new
   exclusive label every time a new heavy aircraft joins the roster.
 - **Heavy-lift tier generated only if at least one type meeting the
   threshold is present in the mission** (dynamic detection, gate), otherwise
-  the point stays at the normal "heavy" tier — avoids loading points that
+  the point stays at the normal "heavy" tier: avoids loading points that
   are structurally unreachable in sessions without the right aircraft.
 - **Arrival filter at the point**: warning (not a block) if the player's
   helicopter type is not suited to the tier generated at that point,
@@ -245,12 +245,12 @@ water pickup, fast-rope).
   downgrades: a heavy-lift aircraft may randomly receive a light tier, which
   is no challenge for it). On selection: despawn of the current Cargo,
   respawn with the chosen tier's mass at the same position, with a delay
-  (20-30 s, justified as re-rigging time) to give the change a real cost —
+  (20-30 s, justified as re-rigging time) to give the change a real cost:
   without the delay the tier system becomes decorative, because every player
   would instantly adjust the load to their own aircraft.
 - The actual kg values for each tier must be anchored to the real external
   load capacity of the modules planned for the mission (UH-1H, Mi-8, CH-47F
-  etc.), not invented at the desk — still to be verified with real data
+  etc.), not invented at the desk: still to be verified with real data
   before fixing the final table. Note: lift capacity is NOT exposed by the
   API per unit type (the descriptor provides `massEmpty` and `fuelMassMax`,
   not a max external load), so this table must be maintained by hand as
@@ -261,7 +261,7 @@ water pickup, fast-rope).
   **Important caveat**: the native documentation warns that *some* cargo
   object types have a fixed mass and ignore the passed value. So the tier
   generator must use a cargo type that accepts a custom mass, to be confirmed
-  in the ME for the chosen type — it is not guaranteed that any cargo object
+  in the ME for the chosen type: it is not guaranteed that any cargo object
   accepts an arbitrary mass. The StaticObject class exposes no method to
   change the mass at runtime, so the tier change must be done with a
   despawn + respawn of the object.
@@ -270,7 +270,7 @@ water pickup, fast-rope).
 
 - Recovery of casualties to a hospital helipad, with a criticality timer
   decaying over time as a score variable.
-- **Hospital delivery — careful, verified technical correction**:
+- **Hospital delivery: careful, verified technical correction**:
   `S_EVENT_LAND` fires ONLY on landing on a recognized Airbase, FARP or ship
   object (the event's `place` field), NOT on terrain or arbitrary building
   covers. Hospital pads on Syria are generally not defined FARP/airbase
@@ -279,7 +279,7 @@ water pickup, fast-rope).
   on the pad for X seconds), NOT with `S_EVENT_LAND`. `S_EVENT_LAND` remains
   valid only if the delivery pad is actually a FARP defined in the ME.
 - **Recovery in a hostile setting** (accident, unsafe LZ, battlefield
-  terrain): same `HoverZoneTrigger` module as firefighting/SAR — on success,
+  terrain): same `HoverZoneTrigger` module as firefighting/SAR: on success,
   the casualty unit is despawned as if loaded aboard.
 - On delivery no person needs respawning: just consume the "subject aboard ->
   rescued" state flag when the landing in the zone is detected, unlike the
@@ -313,7 +313,7 @@ served only to confirm how they call the underlying native functions.
   `activateBeacon`), but only some modules can home (Mi-8, Huey, Gazelle,
   AH-64D via NDB), it needs an .ogg file and can be finicky. Textual
   coordinate fallback for the others.
-- **Lift capacity NOT exposed per type** by the API — type->capacity table
+- **Lift capacity NOT exposed per type** by the API: type->capacity table
   to maintain by hand as config.
 - **Native troop embark/disembark tasks = AI-to-AI**, they force the landing
   and do not let you choose the zone. Player-driven fast-rope needs a

@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- DCS Civil Mission Template — Police (Chase + SWAT)
+-- DCS Civil Mission Template - Police (Chase + SWAT)
 -- File: 30_CivilPolice.lua  (requires 01_CivilCore.lua)
 --
 --   CHASE: fugitive car spawned on a "CIVIL Police Point" (pool placed on

@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- DCS Civil Mission Template — Civil Cargo Transport (mass tiers)
+-- DCS Civil Mission Template - Civil Cargo Transport (mass tiers)
 -- File: 40_CivilTransport.lua  (requires 01_CivilCore.lua)
 --
 --   - Fixed mass tiers LIGHT/MEDIUM/HEAVY + HEAVY_LIFT: objective masses
@@ -10,7 +10,7 @@
 --   - Arrival WARNING (not a block) if the player's type is not suited to
 --     the tier, from the same type->capacity table used by the gate.
 --   - Tier change via F10 with a delay (despawn + respawn: cargo mass is
---     not editable at runtime — verified).
+--     not editable at runtime, verified).
 --   - Native mass: mass/canCargo fields of coalition.addStaticObject.
 --     WARNING: some cargo types have a fixed mass -> validate the
 --     configured types in the Mission Editor.
@@ -196,7 +196,7 @@ end
 ----------------------------------------------------------------------
 -- DELIVERY
 -- The (slung) cargo arrives inside the destination zone. Detected by
--- polling the cargo position — slung-object behavior TO TEST in-game.
+-- polling the cargo position; slung-object behavior TO TEST in-game.
 ----------------------------------------------------------------------
 
 CIV.schedule(function(_, t)

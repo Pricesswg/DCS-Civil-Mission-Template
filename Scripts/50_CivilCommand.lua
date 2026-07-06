@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- DCS Civil Mission Template — Command Center (game-master console)
+-- DCS Civil Mission Template - Command Center (game-master console)
 -- File: 50_CivilCommand.lua  (requires 01_CivilCore.lua and the
 -- intervention files; load LAST)
 --

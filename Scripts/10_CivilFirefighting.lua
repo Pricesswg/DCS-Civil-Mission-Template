@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- DCS Civil Mission Template — Firefighting
+-- DCS Civil Mission Template - Firefighting
 -- File: 10_CivilFirefighting.lua  (requires 01_CivilCore.lua)
 --
 -- Fire zone manager + helicopter water ops + C-130 retardant ops.

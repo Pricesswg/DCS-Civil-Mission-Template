@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- DCS Civil Mission Template — Core
+-- DCS Civil Mission Template - Core
 -- File: 01_CivilCore.lua  (load FIRST, before the intervention files)
 --
 -- Pure native DCS scripting Lua. No MIST / MOOSE / CTLD.
@@ -118,7 +118,7 @@ CIV.Config = {
   ------------------------------------------------------------------
   -- Scoring. Difficulty weights are fixed NOW (changing them later would
   -- mean recomputing history). points = base * (0.5 + 0.35*quality +
-  -- 0.15*timeFactor) * mult   — see CIV.Score.compute.
+  -- 0.15*timeFactor) * mult. See CIV.Score.compute.
   ------------------------------------------------------------------
   score = {
     base = {
@@ -142,7 +142,7 @@ CIV.Config = {
   ------------------------------------------------------------------
   -- Civil transport: fixed mass tiers (kg). TO VALIDATE against the real
   -- external load capacity of the mission's modules. NOTE: some cargo
-  -- object types ignore the custom 'mass' field — confirm the types in ME.
+  -- object types ignore the custom 'mass' field: confirm the types in ME.
   ------------------------------------------------------------------
   cargo = {
     tiers = {
@@ -542,7 +542,7 @@ function CIV.severityMult(sev)
   return s.base + s.perPoint * math.max(1, math.min(10, sev))
 end
 
--- Self-contained atan2 (avoids DCS Lua build differences) — from 527th CSAR
+-- Self-contained atan2 (avoids DCS Lua build differences), from the 527th CSAR
 local function atan2(y, x)
   y = y or 0; x = x or 0
   if x > 0 then return math.atan(y / x)
