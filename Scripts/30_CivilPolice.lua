@@ -75,15 +75,19 @@ function PL.startChase()
   if not start then return nil end
 
   PL._cid = PL._cid + 1
-  local gname = CIV.spawnGround(start.point, 1, C.templates.fugitive,
+  -- one severity roll shapes the chase: car speed, pressure rates, convoy
+  -- size and score (severity 10 = fast car, slow pressure build, 2 vehicles)
+  local sev = CIV.rollSeverity(CP.severity)
+  local cars = sev >= CP.convoySeverity and 2 or 1
+  local gname = CIV.spawnGround(start.point, cars, C.templates.fugitive,
     C.fallbackTypes.fugitive, "CIVIL_FUGITIVE")
 
   local chase = {
     id = PL._cid, gname = gname, startPt = start,
-    -- one-shot randomization: a recognizable "character" per event
-    speed        = CIV.randBetween(CP.carSpeed),
-    rateUp       = CIV.randBetween(CP.pressureUp),
-    rateDown     = CIV.randBetween(CP.pressureDown),
+    severity     = sev,
+    speed        = CIV.sevLerp(sev, CP.carSpeed.min, CP.carSpeed.max),
+    rateUp       = CIV.sevLerp(sev, CP.pressureUp.max, CP.pressureUp.min),
+    rateDown     = CIV.sevLerp(sev, CP.pressureDown.min, CP.pressureDown.max),
     pressure     = 0,            -- 0..100, per-chase state
     roadAction   = "On Road",
     stalledSince = nil, rekicks = 0,
@@ -96,11 +100,13 @@ function PL.startChase()
     "Police chase #" .. chase.id .. " last report", "chase")
   CIV.schedule(function() assignRoute(chase) end, nil, 2)
 
-  CIV.msgAll("POLICE: fleeing vehicle reported near " .. start.name ..
+  CIV.msgAll("POLICE: fleeing " .. (cars > 1 and "CONVOY" or "vehicle") ..
+    " reported near " .. start.name .. " (severity " .. sev .. "/10)" ..
     "\n" .. CIV.coordText(start.point) ..
     "\nLast reported area highlighted on the F10 map." ..
     "\nKeep helicopter contact on the vehicle to build up pressure.", 25)
-  CIV.log("Chase #" .. chase.id .. " started at " .. start.name)
+  CIV.log("Chase #" .. chase.id .. " started at " .. start.name ..
+    " severity " .. sev)
   return chase
 end
 
@@ -143,7 +149,8 @@ CIV.schedule(function(_, t)
           if CIV.dist2D(h:getPoint(), p) <= CP.pressureRadius then closest = info end
         end)
         if closest then
-          CIV.Score.award(closest.playerName, "chase", 0.8, 0.5, 1, "fugitive arrest")
+          CIV.Score.award(closest.playerName, "chase", 0.8, 0.5,
+            CIV.severityMult(chase.severity), "fugitive arrest")
         end
         closeChase(chase, 90)
       else
@@ -192,6 +199,23 @@ local function sState(uname)
   return swatState[uname]
 end
 
+-- operators required by a scenario, from its severity roll
+local function requiredOperators(scen)
+  return math.floor(CIV.sevLerp(scen.severity, CS.squadSize.min, CS.squadSize.max) + 0.5)
+end
+
+-- boarding sizes the team for the WORST active scenario (the squad size
+-- stays fixed at boarding, per the design rule; the severity roll just
+-- tells the base how many operators the callout needs)
+local function boardingSize()
+  local worst = nil
+  for _, scen in pairs(SW._scenarios) do
+    if not worst or scen.severity > worst.severity then worst = scen end
+  end
+  if worst then return requiredOperators(worst) end
+  return math.random(CS.squadSize.min, CS.squadSize.max)
+end
+
 local function boardTeam(uname)
   local u = Unit.getByName(uname)
   if not u or not u:isExist() then return end
@@ -220,7 +244,7 @@ local function boardTeam(uname)
       return
     end
     -- squad size fixed HERE, at boarding (design rule)
-    st.squad = math.random(CS.squadSize.min, CS.squadSize.max)
+    st.squad = boardingSize()
     CIV.msgUnit(u2, "SWAT team aboard: " .. st.squad ..
       " operators. Insert them on the active objective via fast-rope.", 15)
   end, nil, CS.boardingTime)
@@ -230,7 +254,8 @@ function SW.startScenario()
   local pt = CIV.Pool.pick(C.zones.swatPoints, 500)
   if not pt then return nil end
   SW._sid = SW._sid + 1
-  local scen = { id = SW._sid, pt = pt }
+  -- one severity roll shapes the scenario: operators required, resolve time, score
+  local scen = { id = SW._sid, pt = pt, severity = CIV.rollSeverity(CS.severity) }
   SW._scenarios[scen.id] = scen
   CIV.Pool.occupy(pt)
   scen.circleId = CIV.drawEventZone(pt.area, "SWAT objective #" .. scen.id, "swat")
@@ -240,8 +265,8 @@ function SW.startScenario()
     center = pt.point, label = "SWAT - fast-rope",
     radius = hp.radius, minAGL = hp.minAGL, maxAGL = hp.maxAGL,
     maxSpeed = hp.maxSpeed, T = hp.T, window = hp.window, B = hp.B,
-    -- only hooks helicopters WITH a team aboard
-    filter = function(u) return sState(u:getName()).squad > 0 end,
+    -- only hooks helicopters carrying enough operators for this scenario
+    filter = function(u) return sState(u:getName()).squad >= requiredOperators(scen) end,
     onSuccess = function(unit, session)
       local uname = unit:getName()
       local st = sState(uname)
@@ -257,14 +282,15 @@ function SW.startScenario()
       if info then
         CIV.Score.award(info.playerName, "swat",
           CIV.Score.hoverQuality(session), CIV.Score.hoverTimeFactor(session),
-          1, "SWAT insertion")
+          CIV.severityMult(scen.severity), "SWAT insertion")
       end
       CIV.schedule(function()
         CIV.msgAll("SWAT: scenario at " .. pt.name .. " RESOLVED. Area secure.", 15)
         CIV.unmark(scen.circleId)
         CIV.Pool.release(pt)
         SW._scenarios[scen.id] = nil
-      end, nil, CS.resolveTime)
+      end, nil, CS.resolveTime
+        * CIV.sevLerp(scen.severity, CS.resolveFactor.atMin, CS.resolveFactor.atMax))
     end,
     onFail = function()
       CIV.msgAll("SWAT: intervention at " .. pt.name .. " FAILED (window expired).", 15)
@@ -274,6 +300,8 @@ function SW.startScenario()
     end,
   })
   CIV.msgAll("SWAT: hostile scenario reported at " .. pt.name ..
+    " (severity " .. scen.severity .. "/10, requires " ..
+    requiredOperators(scen) .. "+ operators)" ..
     "\n" .. CIV.coordText(pt.point) ..
     "\nBoard a team at the base and insert it via fast-rope.", 25)
   return scen

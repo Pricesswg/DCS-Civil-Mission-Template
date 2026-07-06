@@ -236,11 +236,19 @@ function R.startEvent(key)
   end
 
   sc._eid = sc._eid + 1
+  -- one severity roll shapes the whole event: deadline, hover envelope, score
+  local sev = CIV.rollSeverity(def.severityRange)
+  local se = C.rescue.severityEffects
   local evt = {
     id = sc._eid, pt = pt, point = pt.point,
+    severity = sev,
     spawnTime = timer.getTime(),
-    deadline = def.deadline and (timer.getTime() + def.deadline) or nil,
   }
+  if def.deadline then
+    evt.deadlineTotal = def.deadline
+      * CIV.sevLerp(sev, se.deadlineFactor.atMin, se.deadlineFactor.atMax)
+    evt.deadline = timer.getTime() + evt.deadlineTotal
+  end
   if def.kind == "boat" then
     evt.gname = CIV.spawnBoat(pt.point, "CIVIL_" .. def.key)
   else
@@ -269,22 +277,26 @@ function R.startEvent(key)
     and CIV.vagueDirection(refPoint, refName, evt.point)
     or "position unknown"
 
-  local msg = def.label .. ": subject awaiting recovery, " .. evt.vagueText ..
+  local msg = def.label .. " (severity " .. sev .. "/10): subject awaiting " ..
+    "recovery, " .. evt.vagueText ..
     ".\nApproximate search area marked on the F10 map. Exact position " ..
     "requires a spotter aircraft overhead (or request smoke when close)."
   if evt.beaconName then
     msg = msg .. string.format("\nBeacon active on %.3f MHz", def.beacon.freqHz / 1e6)
   end
   if evt.deadline then
-    msg = msg .. string.format("\nCriticality: %d minutes", math.floor(def.deadline / 60))
+    msg = msg .. string.format("\nCriticality: %d minutes", math.floor(evt.deadlineTotal / 60))
   end
   CIV.msgAll(msg, 25)
 
+  -- severity shapes the hover envelope: less window, more required time
   local hp = def.hoverCfg
+  local windowS = hp.window * CIV.sevLerp(sev, se.windowFactor.atMin, se.windowFactor.atMax)
+  local requiredT = hp.T * CIV.sevLerp(sev, se.tFactor.atMin, se.tFactor.atMax)
   evt.watch = CIV.Hover.watch({
     center = evt.point, label = def.label .. " - extraction",
     radius = hp.radius, minAGL = hp.minAGL, maxAGL = hp.maxAGL,
-    maxSpeed = hp.maxSpeed, T = hp.T, window = hp.window, B = hp.B,
+    maxSpeed = hp.maxSpeed, T = requiredT, window = windowS, B = hp.B,
     onSuccess = function(unit, session)
       -- despawn = loaded aboard; delivery just consumes the state flag
       CIV.despawnGroup(evt.gname)
@@ -296,6 +308,7 @@ function R.startEvent(key)
         quality = def.qualityFn and def.qualityFn(evt, session)
                   or CIV.Score.hoverQuality(session),
         timeFactor = CIV.Score.hoverTimeFactor(session),
+        mult = CIV.severityMult(evt.severity),
       })
       sc.events[evt.id] = nil
       CIV.Pool.release(evt.pt)
@@ -311,7 +324,7 @@ function R.startEvent(key)
       -- (spotter credit). Everything else fails as before.
       if def.kind == "boat" and evt.vessels and #evt.vessels > 0 then
         evt.heloFailed = true
-        evt.hardDeadline = timer.getTime() + hp.window
+        evt.hardDeadline = timer.getTime() + windowS
         CIV.msgAll(def.label .. ": helicopter recovery window EXPIRED at " ..
           pt.name .. ". Rescue vessels are still en route: the subject is " ..
           "holding on for now.", 20)
@@ -385,7 +398,7 @@ CIV.schedule(function(_, t)
                 CIV.msgUnit(u, subj.label .. ": the subject died before delivery.", 15)
               elseif info then
                 CIV.Score.award(info.playerName, subj.scoreType,
-                  subj.quality, subj.timeFactor, 1, subj.label)
+                  subj.quality, subj.timeFactor, subj.mult or 1, subj.label)
               end
             end
             R._aboard[uname] = {}
@@ -518,7 +531,8 @@ CIV.schedule(function(_, t)
               local msg = sc.def.label .. ": subject RECOVERED by a rescue vessel."
               if evt.spotterName then
                 CIV.Score.award(evt.spotterName, sc.def.scoreType, 0.7, 0.5,
-                  vcfg.spotterScoreMult, "sea rescue (spotter credit)")
+                  vcfg.spotterScoreMult * CIV.severityMult(evt.severity),
+                  "sea rescue (spotter credit)")
               else
                 msg = msg .. " No spotter on station: no credit assigned."
               end
@@ -539,10 +553,19 @@ end, nil, 25)
 -- SCENARIO INSTANCES
 ----------------------------------------------------------------------
 
+-- quality = remaining criticality fraction at PICKUP time (delivery past
+-- the deadline still voids the score, see the delivery loop). Uses the
+-- severity-scaled per-event deadline.
+local function criticalityQuality(evt)
+  local left = evt.deadline - timer.getTime()
+  return math.max(0, math.min(1, left / evt.deadlineTotal))
+end
+
 R.newScenario({
   key = "SAR_MOUNTAIN", label = "SAR Mountain", kind = "ground",
   poolPrefix = C.zones.sarMountainPoints, region = C.zones.sarMountainRegion,
   maxActive = C.rescue.sarMountain.maxActive, beacon = C.rescue.sarMountain.beacon,
+  severityRange = C.rescue.sarMountain.severity,
   scoreType = "sarMountain", hoverCfg = C.hover.sarMountain,
 })
 
@@ -551,6 +574,7 @@ R.newScenario({
   -- a floating unit on open water is a standard DCS use case: low risk
   poolPrefix = C.zones.sarSeaPoints, region = C.zones.sarSeaRegion,
   maxActive = C.rescue.sarSea.maxActive, beacon = C.rescue.sarSea.beacon,
+  severityRange = C.rescue.sarSea.severity,
   scoreType = "sarSea", hoverCfg = C.hover.sarSea,
 })
 
@@ -558,14 +582,10 @@ R.newScenario({
   key = "MEDEVAC", label = "MedEvac", kind = "ground",
   poolPrefix = C.zones.medevacPoints, region = nil,
   maxActive = C.rescue.medevac.maxActive, beacon = nil,
+  severityRange = C.rescue.medevac.severity,
   scoreType = "medevac", hoverCfg = C.hover.medevac,
   deadline = C.rescue.medevac.criticality,
-  -- quality = remaining criticality fraction at PICKUP time (delivery past
-  -- the deadline still voids the score, see the delivery loop)
-  qualityFn = function(evt)
-    local left = evt.deadline - timer.getTime()
-    return math.max(0, math.min(1, left / C.rescue.medevac.criticality))
-  end,
+  qualityFn = criticalityQuality,
 })
 
 -- Battlefield casualty extraction: same flow as MedEvac (the concept
@@ -576,12 +596,10 @@ R.newScenario({
   poolPrefix = C.zones.casevacPoints, region = nil,
   maxActive = C.rescue.casevac.maxActive, beacon = nil,
   templatePrefix = C.templates.casualty,
+  severityRange = C.rescue.casevac.severity,
   scoreType = "casevac", hoverCfg = C.hover.casevac,
   deadline = C.rescue.casevac.criticality,
-  qualityFn = function(evt)
-    local left = evt.deadline - timer.getTime()
-    return math.max(0, math.min(1, left / C.rescue.casevac.criticality))
-  end,
+  qualityFn = criticalityQuality,
 })
 
 ----------------------------------------------------------------------
@@ -599,7 +617,8 @@ CIV.Menu_register(function(gid, uname)
         -- exact coordinates only once a spotter has identified the subject
         local pos = evt.identified and CIV.llString(evt.point)
           or (evt.vagueText .. " (not identified: needs a spotter overhead)")
-        txt = txt .. string.format("- %s #%d: %s\n", sc.def.label, evt.id, pos)
+        txt = txt .. string.format("- %s #%d (severity %d/10): %s\n",
+          sc.def.label, evt.id, evt.severity, pos)
       end
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active rescue events.", 20)

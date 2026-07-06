@@ -143,6 +143,9 @@ CIV.Config = {
       transport   = 10,     -- multiplied by the cargo tier
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
+    -- Severity score multiplier: mult = base + perPoint * severity.
+    -- ANCHORED NOW (severity 5 = x1.0): changing it later skews history.
+    severity  = { base = 0.7, perPoint = 0.06 },
     broadcast = true,       -- coalition-wide announce on every completed task (live competition)
   },
 
@@ -163,6 +166,12 @@ CIV.Config = {
     heavyLiftMinKg   = 6000,   -- capacity threshold that unlocks the HEAVY_LIFT tier
     maxActive        = 3,
     warnRadius       = 1000,   -- m, "aircraft not suited to this tier" warning radius
+
+    -- Delivery PRIORITY (the transport flavor of the severity scale): one
+    -- roll per loading point. It multiplies the score and sets a time to
+    -- live: urgent loads expire sooner if nobody delivers them.
+    priority = { min = 1, max = 10 },
+    priorityTtl = { atMin = 7200, atMax = 2700 },  -- s: priority 1 -> 2h, priority 10 -> 45min
 
     -- Supply airdrop into the cargo destination zone (official C-130
     -- module): CRATE type containers landing inside CIVIL Cargo Destination
@@ -260,19 +269,34 @@ CIV.Config = {
   rescue = {
     sarMountain = {
       maxActive = 2,
+      severity  = { min = 1, max = 10 },
       beacon = { enabled = false,   -- needs an .ogg file inside the .miz; homing only on some modules (finicky)
                  file = "l10-beacon.ogg", freqHz = 40500000, modulation = 1, power = 100 },
     },
-    sarSea  = { maxActive = 2, beacon = { enabled = false } },
+    sarSea  = { maxActive = 2, severity = { min = 1, max = 10 }, beacon = { enabled = false } },
     medevac = {
       maxActive   = 2,
-      criticality = 1800,  -- s: the casualty decays in this time; remaining fraction = score quality
+      criticality = 1800,  -- s baseline, scaled by severity (see severityEffects)
+      severity    = { min = 1, max = 10 },
     },
     -- Battlefield CASEVAC: same engine and flow as MedEvac (hover pickup ->
     -- hospital delivery), hostile-setting skin, tighter criticality.
     casevac = {
       maxActive   = 2,
       criticality = 1500,
+      severity    = { min = 1, max = 10 },
+    },
+
+    -- How severity shapes a rescue event (sevLerp between atMin=severity 1
+    -- and atMax=severity 10):
+    --   windowFactor   scales the hover failure window (worse case = less time)
+    --   tFactor        scales the required hover time (stabilizing a bad
+    --                  casualty takes longer)
+    --   deadlineFactor scales the criticality deadline
+    severityEffects = {
+      windowFactor   = { atMin = 1.15, atMax = 0.85 },
+      tFactor        = { atMin = 0.90, atMax = 1.20 },
+      deadlineFactor = { atMin = 1.30, atMax = 0.60 },
     },
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
@@ -344,17 +368,21 @@ CIV.Config = {
   ------------------------------------------------------------------
   police = {
     maxChases      = 2,
-    carSpeed       = { min = 12, max = 22 },  -- m/s, randomized once per chase
+    severity       = { min = 1, max = 10 },   -- fugitive dangerousness, one roll per chase
+    carSpeed       = { min = 12, max = 22 },  -- m/s, severity 1 -> min, severity 10 -> max
     pressureRadius = 500,   -- m, helicopter inside -> pressure rises
-    pressureUp     = { min = 2.0, max = 4.0 },  -- %/s, randomized once per chase
-    pressureDown   = { min = 1.0, max = 3.0 },
+    pressureUp     = { min = 2.0, max = 4.0 },  -- %/s: severity 10 -> min (harder to build)
+    pressureDown   = { min = 1.0, max = 3.0 },  -- %/s: severity 10 -> max (faster to lose)
+    convoySeverity = 8,     -- severity >= this spawns a two-vehicle convoy
     routeHops      = 3,     -- waypoints generated ahead (local random walk)
     neighborRadius = 1500,  -- m, "nearby points" for the random walk
   },
   swat = {
-    squadSize     = { min = 4, max = 8 },
+    severity      = { min = 1, max = 10 },  -- scenario escalation, one roll per scenario
+    squadSize     = { min = 4, max = 8 },   -- required operators: severity 1 -> min, 10 -> max
     boardingTime  = 20,     -- s stationary at the base to board the team
-    resolveTime   = 300,    -- s after insertion for the squad to "resolve" the scenario
+    resolveTime   = 300,    -- s baseline for the squad to "resolve" the scenario (scaled by severity)
+    resolveFactor = { atMin = 0.7, atMax = 1.5 },
   },
 
   ------------------------------------------------------------------
@@ -468,6 +496,30 @@ end
 -- continuous per-tick jitter).
 function CIV.randBetween(range)
   return range.min + math.random() * (range.max - range.min)
+end
+
+----------------------------------------------------------------------
+-- SEVERITY SCALE (1..10), shared by every event type.
+-- One roll at event start from which all the event's parameters derive
+-- (the "randomize once" rule, made readable: "MedEvac severity 8").
+-- For fires severity is a LIVE variable (grows, gets suppressed); for
+-- every other event it is a static descriptor rolled at spawn.
+----------------------------------------------------------------------
+
+function CIV.rollSeverity(range)
+  range = range or { min = 1, max = 10 }
+  return math.random(range.min, range.max)
+end
+
+-- linear interpolation over the severity scale: sev 1 -> atMin, sev 10 -> atMax
+function CIV.sevLerp(sev, atMin, atMax)
+  return atMin + (sev - 1) / 9 * (atMax - atMin)
+end
+
+-- score multiplier for a given severity (anchored: severity 5 = x1.0)
+function CIV.severityMult(sev)
+  local s = CIV.Config.score.severity
+  return s.base + s.perPoint * math.max(1, math.min(10, sev))
 end
 
 -- Self-contained atan2 (avoids DCS Lua build differences) — from 527th CSAR
@@ -1835,9 +1887,12 @@ local function dropWater(uname)
   if fire then
     CIV.msgUnit(u, "Drop on target!", 10)
     if info then
-      -- fire still burning: partial credit; extinguished: full credit
+      -- fire still burning: partial credit; extinguished: full credit.
+      -- Score scales with the severity the fire had when hit.
+      local preHit = fire.severity + CF.heloDropSeverity
       CIV.Score.award(info.playerName, "fireHelo",
-        Fire._fires[fire.id] and 0.5 or 1.0, 0.5, 1, "firefighting drop")
+        Fire._fires[fire.id] and 0.5 or 1.0, 0.5,
+        CIV.severityMult(preHit), "firefighting drop")
     end
   else
     CIV.msgUnit(u, "Drop missed: no fire within " .. CF.dropRadius ..
@@ -1861,9 +1916,11 @@ CIV.schedule(function(_, t)
             CIV.despawnStatic(st.cargoName)
             st.cargoName = nil
             local info = CIV.players[uname]
+            local preHit = fire.severity
             Fire.applyWater(fire.point, CF.heloDropSeverity, info and info.playerName)
             if info then
-              CIV.Score.award(info.playerName, "fireHelo", 1.0, 0.5, 1, "firefighting drop")
+              CIV.Score.award(info.playerName, "fireHelo", 1.0, 0.5,
+                CIV.severityMult(preHit), "firefighting drop")
             end
             break
           end
@@ -1957,7 +2014,7 @@ local function startLineDrop(uname)
     return
   end
   st.retardant = false
-  st.dropRun = { endTime = timer.getTime() + CF.c130DropSeconds, hits = 0 }
+  st.dropRun = { endTime = timer.getTime() + CF.c130DropSeconds, hits = 0, maxSev = 1 }
   CIV.msgUnit(u, "DROP IN PROGRESS: hold heading and altitude for " ..
     CF.c130DropSeconds .. " seconds.", 10)
 end
@@ -1969,14 +2026,15 @@ CIV.schedule(function(_, t)
     if st.dropRun then
       local u = Unit.getByName(uname)
       if not u or not u:isExist() or now > st.dropRun.endTime then
-        local hits = st.dropRun.hits
+        local hits, maxSev = st.dropRun.hits, st.dropRun.maxSev
         st.dropRun = nil
         if u and u:isExist() then
           local info = CIV.players[uname]
           if hits > 0 and info then
             CIV.msgUnit(u, "Drop complete: effective line.", 10)
             CIV.Score.award(info.playerName, "fireC130",
-              math.min(1, hits / CF.c130DropSeconds), 0.5, 1, "C-130 retardant line")
+              math.min(1, hits / CF.c130DropSeconds), 0.5,
+              CIV.severityMult(maxSev), "C-130 retardant line")
           elseif u then
             CIV.msgUnit(u, "Drop complete: no fire under the line.", 10)
           end
@@ -1986,8 +2044,11 @@ CIV.schedule(function(_, t)
         local agl = CIV.agl(p)
         if agl >= CF.c130DropAGL.min and agl <= CF.c130DropAGL.max then
           local info = CIV.players[uname]
-          if Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName) then
+          local fire = Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName)
+          if fire then
             st.dropRun.hits = st.dropRun.hits + 1
+            st.dropRun.maxSev = math.max(st.dropRun.maxSev,
+              fire.severity + CF.c130DropPerSec)
           end
         end
       end
@@ -2012,8 +2073,10 @@ if CF.airdrop.enabled then
     local fire = Fire.applyWater(impact, CF.airdrop.severityPerContainer,
       playerInfo and playerInfo.playerName)
     if fire and playerInfo then
+      local preHit = fire.severity + CF.airdrop.severityPerContainer
       CIV.Score.award(playerInfo.playerName, "fireC130",
-        Fire._fires[fire.id] and 0.6 or 1.0, 0.5, 1, "retardant airdrop")
+        Fire._fires[fire.id] and 0.6 or 1.0, 0.5,
+        CIV.severityMult(preHit), "retardant airdrop")
     end
     return fire ~= nil
   end
@@ -2358,11 +2421,19 @@ function R.startEvent(key)
   end
 
   sc._eid = sc._eid + 1
+  -- one severity roll shapes the whole event: deadline, hover envelope, score
+  local sev = CIV.rollSeverity(def.severityRange)
+  local se = C.rescue.severityEffects
   local evt = {
     id = sc._eid, pt = pt, point = pt.point,
+    severity = sev,
     spawnTime = timer.getTime(),
-    deadline = def.deadline and (timer.getTime() + def.deadline) or nil,
   }
+  if def.deadline then
+    evt.deadlineTotal = def.deadline
+      * CIV.sevLerp(sev, se.deadlineFactor.atMin, se.deadlineFactor.atMax)
+    evt.deadline = timer.getTime() + evt.deadlineTotal
+  end
   if def.kind == "boat" then
     evt.gname = CIV.spawnBoat(pt.point, "CIVIL_" .. def.key)
   else
@@ -2391,22 +2462,26 @@ function R.startEvent(key)
     and CIV.vagueDirection(refPoint, refName, evt.point)
     or "position unknown"
 
-  local msg = def.label .. ": subject awaiting recovery, " .. evt.vagueText ..
+  local msg = def.label .. " (severity " .. sev .. "/10): subject awaiting " ..
+    "recovery, " .. evt.vagueText ..
     ".\nApproximate search area marked on the F10 map. Exact position " ..
     "requires a spotter aircraft overhead (or request smoke when close)."
   if evt.beaconName then
     msg = msg .. string.format("\nBeacon active on %.3f MHz", def.beacon.freqHz / 1e6)
   end
   if evt.deadline then
-    msg = msg .. string.format("\nCriticality: %d minutes", math.floor(def.deadline / 60))
+    msg = msg .. string.format("\nCriticality: %d minutes", math.floor(evt.deadlineTotal / 60))
   end
   CIV.msgAll(msg, 25)
 
+  -- severity shapes the hover envelope: less window, more required time
   local hp = def.hoverCfg
+  local windowS = hp.window * CIV.sevLerp(sev, se.windowFactor.atMin, se.windowFactor.atMax)
+  local requiredT = hp.T * CIV.sevLerp(sev, se.tFactor.atMin, se.tFactor.atMax)
   evt.watch = CIV.Hover.watch({
     center = evt.point, label = def.label .. " - extraction",
     radius = hp.radius, minAGL = hp.minAGL, maxAGL = hp.maxAGL,
-    maxSpeed = hp.maxSpeed, T = hp.T, window = hp.window, B = hp.B,
+    maxSpeed = hp.maxSpeed, T = requiredT, window = windowS, B = hp.B,
     onSuccess = function(unit, session)
       -- despawn = loaded aboard; delivery just consumes the state flag
       CIV.despawnGroup(evt.gname)
@@ -2418,6 +2493,7 @@ function R.startEvent(key)
         quality = def.qualityFn and def.qualityFn(evt, session)
                   or CIV.Score.hoverQuality(session),
         timeFactor = CIV.Score.hoverTimeFactor(session),
+        mult = CIV.severityMult(evt.severity),
       })
       sc.events[evt.id] = nil
       CIV.Pool.release(evt.pt)
@@ -2433,7 +2509,7 @@ function R.startEvent(key)
       -- (spotter credit). Everything else fails as before.
       if def.kind == "boat" and evt.vessels and #evt.vessels > 0 then
         evt.heloFailed = true
-        evt.hardDeadline = timer.getTime() + hp.window
+        evt.hardDeadline = timer.getTime() + windowS
         CIV.msgAll(def.label .. ": helicopter recovery window EXPIRED at " ..
           pt.name .. ". Rescue vessels are still en route: the subject is " ..
           "holding on for now.", 20)
@@ -2507,7 +2583,7 @@ CIV.schedule(function(_, t)
                 CIV.msgUnit(u, subj.label .. ": the subject died before delivery.", 15)
               elseif info then
                 CIV.Score.award(info.playerName, subj.scoreType,
-                  subj.quality, subj.timeFactor, 1, subj.label)
+                  subj.quality, subj.timeFactor, subj.mult or 1, subj.label)
               end
             end
             R._aboard[uname] = {}
@@ -2640,7 +2716,8 @@ CIV.schedule(function(_, t)
               local msg = sc.def.label .. ": subject RECOVERED by a rescue vessel."
               if evt.spotterName then
                 CIV.Score.award(evt.spotterName, sc.def.scoreType, 0.7, 0.5,
-                  vcfg.spotterScoreMult, "sea rescue (spotter credit)")
+                  vcfg.spotterScoreMult * CIV.severityMult(evt.severity),
+                  "sea rescue (spotter credit)")
               else
                 msg = msg .. " No spotter on station: no credit assigned."
               end
@@ -2661,10 +2738,19 @@ end, nil, 25)
 -- SCENARIO INSTANCES
 ----------------------------------------------------------------------
 
+-- quality = remaining criticality fraction at PICKUP time (delivery past
+-- the deadline still voids the score, see the delivery loop). Uses the
+-- severity-scaled per-event deadline.
+local function criticalityQuality(evt)
+  local left = evt.deadline - timer.getTime()
+  return math.max(0, math.min(1, left / evt.deadlineTotal))
+end
+
 R.newScenario({
   key = "SAR_MOUNTAIN", label = "SAR Mountain", kind = "ground",
   poolPrefix = C.zones.sarMountainPoints, region = C.zones.sarMountainRegion,
   maxActive = C.rescue.sarMountain.maxActive, beacon = C.rescue.sarMountain.beacon,
+  severityRange = C.rescue.sarMountain.severity,
   scoreType = "sarMountain", hoverCfg = C.hover.sarMountain,
 })
 
@@ -2673,6 +2759,7 @@ R.newScenario({
   -- a floating unit on open water is a standard DCS use case: low risk
   poolPrefix = C.zones.sarSeaPoints, region = C.zones.sarSeaRegion,
   maxActive = C.rescue.sarSea.maxActive, beacon = C.rescue.sarSea.beacon,
+  severityRange = C.rescue.sarSea.severity,
   scoreType = "sarSea", hoverCfg = C.hover.sarSea,
 })
 
@@ -2680,14 +2767,10 @@ R.newScenario({
   key = "MEDEVAC", label = "MedEvac", kind = "ground",
   poolPrefix = C.zones.medevacPoints, region = nil,
   maxActive = C.rescue.medevac.maxActive, beacon = nil,
+  severityRange = C.rescue.medevac.severity,
   scoreType = "medevac", hoverCfg = C.hover.medevac,
   deadline = C.rescue.medevac.criticality,
-  -- quality = remaining criticality fraction at PICKUP time (delivery past
-  -- the deadline still voids the score, see the delivery loop)
-  qualityFn = function(evt)
-    local left = evt.deadline - timer.getTime()
-    return math.max(0, math.min(1, left / C.rescue.medevac.criticality))
-  end,
+  qualityFn = criticalityQuality,
 })
 
 -- Battlefield casualty extraction: same flow as MedEvac (the concept
@@ -2698,12 +2781,10 @@ R.newScenario({
   poolPrefix = C.zones.casevacPoints, region = nil,
   maxActive = C.rescue.casevac.maxActive, beacon = nil,
   templatePrefix = C.templates.casualty,
+  severityRange = C.rescue.casevac.severity,
   scoreType = "casevac", hoverCfg = C.hover.casevac,
   deadline = C.rescue.casevac.criticality,
-  qualityFn = function(evt)
-    local left = evt.deadline - timer.getTime()
-    return math.max(0, math.min(1, left / C.rescue.casevac.criticality))
-  end,
+  qualityFn = criticalityQuality,
 })
 
 ----------------------------------------------------------------------
@@ -2721,7 +2802,8 @@ CIV.Menu_register(function(gid, uname)
         -- exact coordinates only once a spotter has identified the subject
         local pos = evt.identified and CIV.llString(evt.point)
           or (evt.vagueText .. " (not identified: needs a spotter overhead)")
-        txt = txt .. string.format("- %s #%d: %s\n", sc.def.label, evt.id, pos)
+        txt = txt .. string.format("- %s #%d (severity %d/10): %s\n",
+          sc.def.label, evt.id, evt.severity, pos)
       end
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active rescue events.", 20)
@@ -2819,15 +2901,19 @@ function PL.startChase()
   if not start then return nil end
 
   PL._cid = PL._cid + 1
-  local gname = CIV.spawnGround(start.point, 1, C.templates.fugitive,
+  -- one severity roll shapes the chase: car speed, pressure rates, convoy
+  -- size and score (severity 10 = fast car, slow pressure build, 2 vehicles)
+  local sev = CIV.rollSeverity(CP.severity)
+  local cars = sev >= CP.convoySeverity and 2 or 1
+  local gname = CIV.spawnGround(start.point, cars, C.templates.fugitive,
     C.fallbackTypes.fugitive, "CIVIL_FUGITIVE")
 
   local chase = {
     id = PL._cid, gname = gname, startPt = start,
-    -- one-shot randomization: a recognizable "character" per event
-    speed        = CIV.randBetween(CP.carSpeed),
-    rateUp       = CIV.randBetween(CP.pressureUp),
-    rateDown     = CIV.randBetween(CP.pressureDown),
+    severity     = sev,
+    speed        = CIV.sevLerp(sev, CP.carSpeed.min, CP.carSpeed.max),
+    rateUp       = CIV.sevLerp(sev, CP.pressureUp.max, CP.pressureUp.min),
+    rateDown     = CIV.sevLerp(sev, CP.pressureDown.min, CP.pressureDown.max),
     pressure     = 0,            -- 0..100, per-chase state
     roadAction   = "On Road",
     stalledSince = nil, rekicks = 0,
@@ -2840,11 +2926,13 @@ function PL.startChase()
     "Police chase #" .. chase.id .. " last report", "chase")
   CIV.schedule(function() assignRoute(chase) end, nil, 2)
 
-  CIV.msgAll("POLICE: fleeing vehicle reported near " .. start.name ..
+  CIV.msgAll("POLICE: fleeing " .. (cars > 1 and "CONVOY" or "vehicle") ..
+    " reported near " .. start.name .. " (severity " .. sev .. "/10)" ..
     "\n" .. CIV.coordText(start.point) ..
     "\nLast reported area highlighted on the F10 map." ..
     "\nKeep helicopter contact on the vehicle to build up pressure.", 25)
-  CIV.log("Chase #" .. chase.id .. " started at " .. start.name)
+  CIV.log("Chase #" .. chase.id .. " started at " .. start.name ..
+    " severity " .. sev)
   return chase
 end
 
@@ -2887,7 +2975,8 @@ CIV.schedule(function(_, t)
           if CIV.dist2D(h:getPoint(), p) <= CP.pressureRadius then closest = info end
         end)
         if closest then
-          CIV.Score.award(closest.playerName, "chase", 0.8, 0.5, 1, "fugitive arrest")
+          CIV.Score.award(closest.playerName, "chase", 0.8, 0.5,
+            CIV.severityMult(chase.severity), "fugitive arrest")
         end
         closeChase(chase, 90)
       else
@@ -2936,6 +3025,23 @@ local function sState(uname)
   return swatState[uname]
 end
 
+-- operators required by a scenario, from its severity roll
+local function requiredOperators(scen)
+  return math.floor(CIV.sevLerp(scen.severity, CS.squadSize.min, CS.squadSize.max) + 0.5)
+end
+
+-- boarding sizes the team for the WORST active scenario (the squad size
+-- stays fixed at boarding, per the design rule; the severity roll just
+-- tells the base how many operators the callout needs)
+local function boardingSize()
+  local worst = nil
+  for _, scen in pairs(SW._scenarios) do
+    if not worst or scen.severity > worst.severity then worst = scen end
+  end
+  if worst then return requiredOperators(worst) end
+  return math.random(CS.squadSize.min, CS.squadSize.max)
+end
+
 local function boardTeam(uname)
   local u = Unit.getByName(uname)
   if not u or not u:isExist() then return end
@@ -2964,7 +3070,7 @@ local function boardTeam(uname)
       return
     end
     -- squad size fixed HERE, at boarding (design rule)
-    st.squad = math.random(CS.squadSize.min, CS.squadSize.max)
+    st.squad = boardingSize()
     CIV.msgUnit(u2, "SWAT team aboard: " .. st.squad ..
       " operators. Insert them on the active objective via fast-rope.", 15)
   end, nil, CS.boardingTime)
@@ -2974,7 +3080,8 @@ function SW.startScenario()
   local pt = CIV.Pool.pick(C.zones.swatPoints, 500)
   if not pt then return nil end
   SW._sid = SW._sid + 1
-  local scen = { id = SW._sid, pt = pt }
+  -- one severity roll shapes the scenario: operators required, resolve time, score
+  local scen = { id = SW._sid, pt = pt, severity = CIV.rollSeverity(CS.severity) }
   SW._scenarios[scen.id] = scen
   CIV.Pool.occupy(pt)
   scen.circleId = CIV.drawEventZone(pt.area, "SWAT objective #" .. scen.id, "swat")
@@ -2984,8 +3091,8 @@ function SW.startScenario()
     center = pt.point, label = "SWAT - fast-rope",
     radius = hp.radius, minAGL = hp.minAGL, maxAGL = hp.maxAGL,
     maxSpeed = hp.maxSpeed, T = hp.T, window = hp.window, B = hp.B,
-    -- only hooks helicopters WITH a team aboard
-    filter = function(u) return sState(u:getName()).squad > 0 end,
+    -- only hooks helicopters carrying enough operators for this scenario
+    filter = function(u) return sState(u:getName()).squad >= requiredOperators(scen) end,
     onSuccess = function(unit, session)
       local uname = unit:getName()
       local st = sState(uname)
@@ -3001,14 +3108,15 @@ function SW.startScenario()
       if info then
         CIV.Score.award(info.playerName, "swat",
           CIV.Score.hoverQuality(session), CIV.Score.hoverTimeFactor(session),
-          1, "SWAT insertion")
+          CIV.severityMult(scen.severity), "SWAT insertion")
       end
       CIV.schedule(function()
         CIV.msgAll("SWAT: scenario at " .. pt.name .. " RESOLVED. Area secure.", 15)
         CIV.unmark(scen.circleId)
         CIV.Pool.release(pt)
         SW._scenarios[scen.id] = nil
-      end, nil, CS.resolveTime)
+      end, nil, CS.resolveTime
+        * CIV.sevLerp(scen.severity, CS.resolveFactor.atMin, CS.resolveFactor.atMax))
     end,
     onFail = function()
       CIV.msgAll("SWAT: intervention at " .. pt.name .. " FAILED (window expired).", 15)
@@ -3018,6 +3126,8 @@ function SW.startScenario()
     end,
   })
   CIV.msgAll("SWAT: hostile scenario reported at " .. pt.name ..
+    " (severity " .. scen.severity .. "/10, requires " ..
+    requiredOperators(scen) .. "+ operators)" ..
     "\n" .. CIV.coordText(pt.point) ..
     "\nBoard a team at the base and insert it via fast-rope.", 25)
   return scen
@@ -3110,8 +3220,14 @@ function CG.startPoint(forcedTier)
 
   local tier = forcedTier or randomTier()
   CG._pid = CG._pid + 1
+  -- delivery priority (transport flavor of the severity scale): one roll
+  -- per point, drives the score multiplier and the time to live
+  local priority = CIV.rollSeverity(CC.priority)
   local point = {
     id = CG._pid, pt = pt, tier = tier,
+    priority = priority,
+    expiresAt = timer.getTime()
+      + CIV.sevLerp(priority, CC.priorityTtl.atMin, CC.priorityTtl.atMax),
     cargoName = CIV.spawnCargo(pt.point, CC.tiers[tier].cargoType,
       CC.tiers[tier].kg, "CIVIL_TRANSPORT"),
     spawnPos = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
@@ -3120,12 +3236,15 @@ function CG.startPoint(forcedTier)
   CG._points[point.id] = point
   CIV.Pool.occupy(pt)
   point.zoneMarkId = CIV.drawEventZone(pt.area,
-    "Cargo pickup " .. pt.name .. " (" .. tier .. ")", "transport")
+    "Cargo pickup " .. pt.name .. " (" .. tier .. ", priority " .. priority .. ")",
+    "transport")
   CIV.msgAll(string.format(
-    "TRANSPORT: %s load (%d kg) available at %s\n%s\nDestination: %s " ..
-    "(pickup zone highlighted on the F10 map)",
-    tier, CC.tiers[tier].kg, pt.name, CIV.coordText(pt.point),
-    C.zones.cargoDestination), 25)
+    "TRANSPORT: %s load (%d kg, priority %d/10) available at %s\n%s\n" ..
+    "Destination: %s (pickup zone highlighted on the F10 map). " ..
+    "Expires in %d minutes.",
+    tier, CC.tiers[tier].kg, priority, pt.name, CIV.coordText(pt.point),
+    C.zones.cargoDestination,
+    math.floor((point.expiresAt - timer.getTime()) / 60)), 25)
   return point
 end
 
@@ -3222,7 +3341,13 @@ CIV.schedule(function(_, t)
   local dest = CIV.Zones.byName(C.zones.cargoDestination)
   if not dest then return t + 60 end
   for id, point in pairs(CG._points) do
-    if point.cargoName and not point.changing then
+    -- urgent loads expire if nobody delivers them in time
+    if timer.getTime() > point.expiresAt then
+      CIV.msgAll("TRANSPORT: load at " .. point.pt.name ..
+        " EXPIRED undelivered (priority " .. point.priority .. "/10).", 12)
+      if point.cargoName then CIV.despawnStatic(point.cargoName) end
+      closePoint(point)
+    elseif point.cargoName and not point.changing then
       local s = StaticObject.getByName(point.cargoName)
       if not s then
         -- cargo destroyed (dropped/broken): event closed without points
@@ -3242,7 +3367,8 @@ CIV.schedule(function(_, t)
             C.zones.cargoDestination .. "!", 15)
           if closest and minDist < 500 then
             CIV.Score.award(closest.playerName, "transport", 0.8, 0.5,
-              C.score.tierMult[point.tier], point.tier .. " transport")
+              C.score.tierMult[point.tier] * CIV.severityMult(point.priority),
+              point.tier .. " transport (priority " .. point.priority .. ")")
           end
           CIV.despawnStatic(point.cargoName)
           closePoint(point)
@@ -3334,8 +3460,10 @@ CIV.Menu_register(function(gid, uname)
     local n, txt = 0, "Active loading points:\n"
     for _, point in pairs(CG._points) do
       n = n + 1
-      txt = txt .. string.format("- %s: %s (%d kg)  %s\n", point.pt.name,
-        point.tier, CC.tiers[point.tier].kg, CIV.llString(point.pt.point))
+      txt = txt .. string.format("- %s: %s (%d kg, priority %d/10, %d min left)  %s\n",
+        point.pt.name, point.tier, CC.tiers[point.tier].kg, point.priority,
+        math.max(0, math.floor((point.expiresAt - timer.getTime()) / 60)),
+        CIV.llString(point.pt.point))
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active loading points.", 20)
   end)

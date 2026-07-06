@@ -341,9 +341,12 @@ local function dropWater(uname)
   if fire then
     CIV.msgUnit(u, "Drop on target!", 10)
     if info then
-      -- fire still burning: partial credit; extinguished: full credit
+      -- fire still burning: partial credit; extinguished: full credit.
+      -- Score scales with the severity the fire had when hit.
+      local preHit = fire.severity + CF.heloDropSeverity
       CIV.Score.award(info.playerName, "fireHelo",
-        Fire._fires[fire.id] and 0.5 or 1.0, 0.5, 1, "firefighting drop")
+        Fire._fires[fire.id] and 0.5 or 1.0, 0.5,
+        CIV.severityMult(preHit), "firefighting drop")
     end
   else
     CIV.msgUnit(u, "Drop missed: no fire within " .. CF.dropRadius ..
@@ -367,9 +370,11 @@ CIV.schedule(function(_, t)
             CIV.despawnStatic(st.cargoName)
             st.cargoName = nil
             local info = CIV.players[uname]
+            local preHit = fire.severity
             Fire.applyWater(fire.point, CF.heloDropSeverity, info and info.playerName)
             if info then
-              CIV.Score.award(info.playerName, "fireHelo", 1.0, 0.5, 1, "firefighting drop")
+              CIV.Score.award(info.playerName, "fireHelo", 1.0, 0.5,
+                CIV.severityMult(preHit), "firefighting drop")
             end
             break
           end
@@ -463,7 +468,7 @@ local function startLineDrop(uname)
     return
   end
   st.retardant = false
-  st.dropRun = { endTime = timer.getTime() + CF.c130DropSeconds, hits = 0 }
+  st.dropRun = { endTime = timer.getTime() + CF.c130DropSeconds, hits = 0, maxSev = 1 }
   CIV.msgUnit(u, "DROP IN PROGRESS: hold heading and altitude for " ..
     CF.c130DropSeconds .. " seconds.", 10)
 end
@@ -475,14 +480,15 @@ CIV.schedule(function(_, t)
     if st.dropRun then
       local u = Unit.getByName(uname)
       if not u or not u:isExist() or now > st.dropRun.endTime then
-        local hits = st.dropRun.hits
+        local hits, maxSev = st.dropRun.hits, st.dropRun.maxSev
         st.dropRun = nil
         if u and u:isExist() then
           local info = CIV.players[uname]
           if hits > 0 and info then
             CIV.msgUnit(u, "Drop complete: effective line.", 10)
             CIV.Score.award(info.playerName, "fireC130",
-              math.min(1, hits / CF.c130DropSeconds), 0.5, 1, "C-130 retardant line")
+              math.min(1, hits / CF.c130DropSeconds), 0.5,
+              CIV.severityMult(maxSev), "C-130 retardant line")
           elseif u then
             CIV.msgUnit(u, "Drop complete: no fire under the line.", 10)
           end
@@ -492,8 +498,11 @@ CIV.schedule(function(_, t)
         local agl = CIV.agl(p)
         if agl >= CF.c130DropAGL.min and agl <= CF.c130DropAGL.max then
           local info = CIV.players[uname]
-          if Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName) then
+          local fire = Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName)
+          if fire then
             st.dropRun.hits = st.dropRun.hits + 1
+            st.dropRun.maxSev = math.max(st.dropRun.maxSev,
+              fire.severity + CF.c130DropPerSec)
           end
         end
       end
@@ -518,8 +527,10 @@ if CF.airdrop.enabled then
     local fire = Fire.applyWater(impact, CF.airdrop.severityPerContainer,
       playerInfo and playerInfo.playerName)
     if fire and playerInfo then
+      local preHit = fire.severity + CF.airdrop.severityPerContainer
       CIV.Score.award(playerInfo.playerName, "fireC130",
-        Fire._fires[fire.id] and 0.6 or 1.0, 0.5, 1, "retardant airdrop")
+        Fire._fires[fire.id] and 0.6 or 1.0, 0.5,
+        CIV.severityMult(preHit), "retardant airdrop")
     end
     return fire ~= nil
   end

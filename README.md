@@ -86,22 +86,25 @@ used when absent):**
 | `CIVIL Fugitive …` | police chase car | `LandRover_ah` |
 | `CIVIL Fire Truck …` | fire brigade truck | `HEMTT TFFT` |
 
-## How the fires work (severity model)
+## The severity scale (1-10, all events)
 
-Every fire spawns with a random **severity 1-10** (default roll 1-3) and
-grows +1 on a per-fire random cadence. A small fire is a single smoke/fire
-effect; as severity grows, sub-fires light up around the anchor (capped at 5
-simultaneous effects for performance — size keeps scaling). Suppression
-subtracts severity, 0 = extinguished:
+Every event rolls a **severity 1-10** at spawn — one roll from which all its
+parameters derive, announced in every report ("MedEvac severity 8"):
 
-- helicopter water drop: −2
-- C-130 line drop: −0.25/s along the line (up to −2.5 per pass)
-- airdropped retardant drum on target: −2 per container
-- fire brigade on scene: −0.6/min, continuously
+| Event | Severity drives |
+|---|---|
+| Wildfire | LIVE variable: grows on a per-fire cadence, spreads visually (1 effect → cluster, capped at 5 for performance), suppressed by drops/trucks, 0 = out |
+| SAR / MedEvac / CASEVAC | criticality deadline (severity 10 = −40%), hover window (less time) and required hover time (more), score |
+| Police chase | car speed, pressure build/decay rates, two-vehicle convoy at severity ≥ 8, score |
+| SWAT | operators required (4→8), squad boarded at the base is sized for the worst active scenario, resolve time, score |
+| Transport ("priority") | time to live of the load (priority 10 expires in 45 min) and score |
 
-The brigade rolls out of the nearest `CIVIL Fire Station` automatically, so
-ground response cuts the air passes needed — players race the clock, not the
-trucks.
+Score multiplier is anchored at `×(0.7 + 0.06·severity)` — severity 5 = ×1.
+
+Fire suppression (in severity units): helicopter drop −2, C-130 line
+−0.25/s, retardant drum −2/container, fire brigade on scene −0.6/min. The
+brigade rolls out of the nearest `CIVIL Fire Station` automatically, cutting
+the air passes needed — players race the clock, not the trucks.
 
 ## Status
 

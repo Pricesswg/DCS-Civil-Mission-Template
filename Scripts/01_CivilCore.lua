@@ -133,6 +133,9 @@ CIV.Config = {
       transport   = 10,     -- multiplied by the cargo tier
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
+    -- Severity score multiplier: mult = base + perPoint * severity.
+    -- ANCHORED NOW (severity 5 = x1.0): changing it later skews history.
+    severity  = { base = 0.7, perPoint = 0.06 },
     broadcast = true,       -- coalition-wide announce on every completed task (live competition)
   },
 
@@ -153,6 +156,12 @@ CIV.Config = {
     heavyLiftMinKg   = 6000,   -- capacity threshold that unlocks the HEAVY_LIFT tier
     maxActive        = 3,
     warnRadius       = 1000,   -- m, "aircraft not suited to this tier" warning radius
+
+    -- Delivery PRIORITY (the transport flavor of the severity scale): one
+    -- roll per loading point. It multiplies the score and sets a time to
+    -- live: urgent loads expire sooner if nobody delivers them.
+    priority = { min = 1, max = 10 },
+    priorityTtl = { atMin = 7200, atMax = 2700 },  -- s: priority 1 -> 2h, priority 10 -> 45min
 
     -- Supply airdrop into the cargo destination zone (official C-130
     -- module): CRATE type containers landing inside CIVIL Cargo Destination
@@ -250,19 +259,34 @@ CIV.Config = {
   rescue = {
     sarMountain = {
       maxActive = 2,
+      severity  = { min = 1, max = 10 },
       beacon = { enabled = false,   -- needs an .ogg file inside the .miz; homing only on some modules (finicky)
                  file = "l10-beacon.ogg", freqHz = 40500000, modulation = 1, power = 100 },
     },
-    sarSea  = { maxActive = 2, beacon = { enabled = false } },
+    sarSea  = { maxActive = 2, severity = { min = 1, max = 10 }, beacon = { enabled = false } },
     medevac = {
       maxActive   = 2,
-      criticality = 1800,  -- s: the casualty decays in this time; remaining fraction = score quality
+      criticality = 1800,  -- s baseline, scaled by severity (see severityEffects)
+      severity    = { min = 1, max = 10 },
     },
     -- Battlefield CASEVAC: same engine and flow as MedEvac (hover pickup ->
     -- hospital delivery), hostile-setting skin, tighter criticality.
     casevac = {
       maxActive   = 2,
       criticality = 1500,
+      severity    = { min = 1, max = 10 },
+    },
+
+    -- How severity shapes a rescue event (sevLerp between atMin=severity 1
+    -- and atMax=severity 10):
+    --   windowFactor   scales the hover failure window (worse case = less time)
+    --   tFactor        scales the required hover time (stabilizing a bad
+    --                  casualty takes longer)
+    --   deadlineFactor scales the criticality deadline
+    severityEffects = {
+      windowFactor   = { atMin = 1.15, atMax = 0.85 },
+      tFactor        = { atMin = 0.90, atMax = 1.20 },
+      deadlineFactor = { atMin = 1.30, atMax = 0.60 },
     },
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
@@ -334,17 +358,21 @@ CIV.Config = {
   ------------------------------------------------------------------
   police = {
     maxChases      = 2,
-    carSpeed       = { min = 12, max = 22 },  -- m/s, randomized once per chase
+    severity       = { min = 1, max = 10 },   -- fugitive dangerousness, one roll per chase
+    carSpeed       = { min = 12, max = 22 },  -- m/s, severity 1 -> min, severity 10 -> max
     pressureRadius = 500,   -- m, helicopter inside -> pressure rises
-    pressureUp     = { min = 2.0, max = 4.0 },  -- %/s, randomized once per chase
-    pressureDown   = { min = 1.0, max = 3.0 },
+    pressureUp     = { min = 2.0, max = 4.0 },  -- %/s: severity 10 -> min (harder to build)
+    pressureDown   = { min = 1.0, max = 3.0 },  -- %/s: severity 10 -> max (faster to lose)
+    convoySeverity = 8,     -- severity >= this spawns a two-vehicle convoy
     routeHops      = 3,     -- waypoints generated ahead (local random walk)
     neighborRadius = 1500,  -- m, "nearby points" for the random walk
   },
   swat = {
-    squadSize     = { min = 4, max = 8 },
+    severity      = { min = 1, max = 10 },  -- scenario escalation, one roll per scenario
+    squadSize     = { min = 4, max = 8 },   -- required operators: severity 1 -> min, 10 -> max
     boardingTime  = 20,     -- s stationary at the base to board the team
-    resolveTime   = 300,    -- s after insertion for the squad to "resolve" the scenario
+    resolveTime   = 300,    -- s baseline for the squad to "resolve" the scenario (scaled by severity)
+    resolveFactor = { atMin = 0.7, atMax = 1.5 },
   },
 
   ------------------------------------------------------------------
@@ -458,6 +486,30 @@ end
 -- continuous per-tick jitter).
 function CIV.randBetween(range)
   return range.min + math.random() * (range.max - range.min)
+end
+
+----------------------------------------------------------------------
+-- SEVERITY SCALE (1..10), shared by every event type.
+-- One roll at event start from which all the event's parameters derive
+-- (the "randomize once" rule, made readable: "MedEvac severity 8").
+-- For fires severity is a LIVE variable (grows, gets suppressed); for
+-- every other event it is a static descriptor rolled at spawn.
+----------------------------------------------------------------------
+
+function CIV.rollSeverity(range)
+  range = range or { min = 1, max = 10 }
+  return math.random(range.min, range.max)
+end
+
+-- linear interpolation over the severity scale: sev 1 -> atMin, sev 10 -> atMax
+function CIV.sevLerp(sev, atMin, atMax)
+  return atMin + (sev - 1) / 9 * (atMax - atMin)
+end
+
+-- score multiplier for a given severity (anchored: severity 5 = x1.0)
+function CIV.severityMult(sev)
+  local s = CIV.Config.score.severity
+  return s.base + s.perPoint * math.max(1, math.min(10, sev))
 end
 
 -- Self-contained atan2 (avoids DCS Lua build differences) — from 527th CSAR

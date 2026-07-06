@@ -62,8 +62,14 @@ function CG.startPoint(forcedTier)
 
   local tier = forcedTier or randomTier()
   CG._pid = CG._pid + 1
+  -- delivery priority (transport flavor of the severity scale): one roll
+  -- per point, drives the score multiplier and the time to live
+  local priority = CIV.rollSeverity(CC.priority)
   local point = {
     id = CG._pid, pt = pt, tier = tier,
+    priority = priority,
+    expiresAt = timer.getTime()
+      + CIV.sevLerp(priority, CC.priorityTtl.atMin, CC.priorityTtl.atMax),
     cargoName = CIV.spawnCargo(pt.point, CC.tiers[tier].cargoType,
       CC.tiers[tier].kg, "CIVIL_TRANSPORT"),
     spawnPos = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
@@ -72,12 +78,15 @@ function CG.startPoint(forcedTier)
   CG._points[point.id] = point
   CIV.Pool.occupy(pt)
   point.zoneMarkId = CIV.drawEventZone(pt.area,
-    "Cargo pickup " .. pt.name .. " (" .. tier .. ")", "transport")
+    "Cargo pickup " .. pt.name .. " (" .. tier .. ", priority " .. priority .. ")",
+    "transport")
   CIV.msgAll(string.format(
-    "TRANSPORT: %s load (%d kg) available at %s\n%s\nDestination: %s " ..
-    "(pickup zone highlighted on the F10 map)",
-    tier, CC.tiers[tier].kg, pt.name, CIV.coordText(pt.point),
-    C.zones.cargoDestination), 25)
+    "TRANSPORT: %s load (%d kg, priority %d/10) available at %s\n%s\n" ..
+    "Destination: %s (pickup zone highlighted on the F10 map). " ..
+    "Expires in %d minutes.",
+    tier, CC.tiers[tier].kg, priority, pt.name, CIV.coordText(pt.point),
+    C.zones.cargoDestination,
+    math.floor((point.expiresAt - timer.getTime()) / 60)), 25)
   return point
 end
 
@@ -174,7 +183,13 @@ CIV.schedule(function(_, t)
   local dest = CIV.Zones.byName(C.zones.cargoDestination)
   if not dest then return t + 60 end
   for id, point in pairs(CG._points) do
-    if point.cargoName and not point.changing then
+    -- urgent loads expire if nobody delivers them in time
+    if timer.getTime() > point.expiresAt then
+      CIV.msgAll("TRANSPORT: load at " .. point.pt.name ..
+        " EXPIRED undelivered (priority " .. point.priority .. "/10).", 12)
+      if point.cargoName then CIV.despawnStatic(point.cargoName) end
+      closePoint(point)
+    elseif point.cargoName and not point.changing then
       local s = StaticObject.getByName(point.cargoName)
       if not s then
         -- cargo destroyed (dropped/broken): event closed without points
@@ -194,7 +209,8 @@ CIV.schedule(function(_, t)
             C.zones.cargoDestination .. "!", 15)
           if closest and minDist < 500 then
             CIV.Score.award(closest.playerName, "transport", 0.8, 0.5,
-              C.score.tierMult[point.tier], point.tier .. " transport")
+              C.score.tierMult[point.tier] * CIV.severityMult(point.priority),
+              point.tier .. " transport (priority " .. point.priority .. ")")
           end
           CIV.despawnStatic(point.cargoName)
           closePoint(point)
@@ -286,8 +302,10 @@ CIV.Menu_register(function(gid, uname)
     local n, txt = 0, "Active loading points:\n"
     for _, point in pairs(CG._points) do
       n = n + 1
-      txt = txt .. string.format("- %s: %s (%d kg)  %s\n", point.pt.name,
-        point.tier, CC.tiers[point.tier].kg, CIV.llString(point.pt.point))
+      txt = txt .. string.format("- %s: %s (%d kg, priority %d/10, %d min left)  %s\n",
+        point.pt.name, point.tier, CC.tiers[point.tier].kg, point.priority,
+        math.max(0, math.floor((point.expiresAt - timer.getTime()) / 60)),
+        CIV.llString(point.pt.point))
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active loading points.", 20)
   end)

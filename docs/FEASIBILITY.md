@@ -133,6 +133,17 @@ These match the concept's list; each item ships with an escape route.
   region or flies within `rescue.intel.spotterDetectRadius` of the subject.
   Survivor smoke on request remains as the close-range aid.
 
+## Severity generalization (v0.2)
+
+The fire severity scale (1-10) is generalized to every event type as the
+single one-shot roll from which all event parameters derive (an extension of
+the concept's "randomize once at event start" rule, made player-readable).
+Fires keep it as a LIVE variable; everywhere else it is a static descriptor:
+rescue deadlines/hover envelope, chase speed/pressure/convoy, SWAT squad
+requirement/resolve time, transport priority/TTL. The score multiplier
+`0.7 + 0.06 × severity` is ANCHORED NOW (severity 5 = ×1), per the same
+rule as the difficulty weights: changing it later skews history.
+
 ## Still-open decisions (unchanged from the concept)
 
 - Leaderboard: live vs consolidated at mission end (the `SCORE|` lines in
