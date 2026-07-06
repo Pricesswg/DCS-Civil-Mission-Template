@@ -406,6 +406,32 @@ CIV.Config = {
   },
 
   ------------------------------------------------------------------
+  -- Command center: game-master driven mission control via F10 map
+  -- markers. Intended for a player in a Game Master / Tactical Commander
+  -- slot (full map view, SRS, native asset control with Combined Arms),
+  -- but commands work from ANY slot. Place a marker whose text starts
+  -- with markerPrefix, e.g.:
+  --   civil fire 7        civil medevac 9      civil casevac
+  --   civil sarm 5        civil sars           civil swat 8
+  --   civil chase 6       civil cargo heavy 9
+  --   civil spawn <template fragment> [count]
+  --   civil move <group fragment> [speed] [road]
+  --   civil cancel        civil director on|off      civil help
+  ------------------------------------------------------------------
+  command = {
+    enabled = true,
+    markerPrefix = "civil",   -- marker text prefix (case-insensitive)
+    removeMarks = true,       -- delete the command marker once executed
+    cancelRadius = 15000,     -- m, "civil cancel" hits the nearest event within this
+    moveSpeed = 10,           -- m/s default for "civil move"
+    restrict = {
+      enabled = false,        -- true = only playerNames below may issue commands
+      playerNames = {},
+      allowUnidentified = true, -- GM/CA slots can produce marks with no readable initiator
+    },
+  },
+
+  ------------------------------------------------------------------
   -- F10 map drawing. Colors are { r, g, b, alpha } with 0..1 values.
   -- Circular zones are drawn with circleToAll; polygon zones with
   -- markupToAll (freeform shape), so the real perimeter is shown.
@@ -600,6 +626,7 @@ CIV.Zones = { _areas = {} }        -- list of { name, kind, center={x,z}, radius
 CIV.Templates = { _groups = {} }   -- list of { name, countryId, category, categoryEnum, data }
 CIV.Ships = {}                     -- every ship unit in the mission: { unitName, groupName }
                                    -- (rescue vessels and mobile hospital ships are found here by prefix)
+CIV.MissionGroups = {}             -- every ME group: { name, category } ("civil move" fragment search)
 CIV._ids = { group = 900000, unit = 900000, mark = 950000 }
 
 function CIV.startsWith(s, prefix)
@@ -703,6 +730,7 @@ local function loadTemplates()
                       data = deepCopy(g),
                     }
                   end
+                  CIV.MissionGroups[#CIV.MissionGroups + 1] = { name = g.name, category = cat }
                   if cat == "ship" and not g.lateActivation and type(g.units) == "table" then
                     for _, u in pairs(g.units) do
                       if u.name then
@@ -1461,14 +1489,17 @@ end
 
 CIV.EventStarters = {}
 
+-- Keeps rescheduling even while disabled, so the command center can turn
+-- the automatic director off and on again at runtime ("civil director on").
 CIV.schedule(function(_, t)
   local cfg = CIV.Config.director
-  if not cfg.enabled then return nil end
-  for key, chance in pairs(cfg.chance) do
-    local starter = CIV.EventStarters[key]
-    if starter and math.random(100) <= chance then
-      local ok, err = pcall(starter.fn)
-      if not ok then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
+  if cfg.enabled then
+    for key, chance in pairs(cfg.chance) do
+      local starter = CIV.EventStarters[key]
+      if starter and math.random(100) <= chance then
+        local ok, err = pcall(starter.fn)
+        if not ok then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
+      end
     end
   end
   return t + CIV.randBetween(cfg.interval)
@@ -1637,12 +1668,14 @@ local function refreshVisuals(fire)
   end
 end
 
-function Fire.ignite(pt)
+function Fire.ignite(pt, severityOverride)
   Fire._fid = Fire._fid + 1
   local fire = {
     id = Fire._fid, pt = pt,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
-    severity = math.random(SEV.initial.min, SEV.initial.max),
+    severity = severityOverride
+      and math.max(1, math.min(SEV.max, severityOverride))
+      or math.random(SEV.initial.min, SEV.initial.max),
     growEvery = CIV.randBetween(SEV.growEvery),   -- fixed for the fire's lifetime
     smokeName = "CIVIL_FIRE_" .. Fire._fid,
     effects = {}, markId = nil,
@@ -1668,6 +1701,16 @@ function Fire.igniteRandom()
   return Fire.ignite(pt)
 end
 
+-- command center: ignite at an arbitrary commanded position
+function Fire.igniteAt(point, severity)
+  Fire._fid = Fire._fid + 1
+  local pt = {
+    name = "GM fire " .. Fire._fid, radius = 150,
+    point = { x = point.x, y = CIV.groundY(point), z = point.z },
+  }
+  return Fire.ignite(pt, severity)
+end
+
 local function extinguish(fire, byWhom)
   for _, eff in ipairs(fire.effects) do
     trigger.action.effectSmokeStop(eff.name)
@@ -1680,6 +1723,11 @@ local function extinguish(fire, byWhom)
   releaseFireTrucks(fire)
   CIV.msgAll("Fire at " .. fire.pt.name .. " EXTINGUISHED" ..
     (byWhom and (" by " .. byWhom) or "") .. ".", 15)
+end
+
+-- command center: call a fire off without scoring
+function Fire.callOff(fire)
+  extinguish(fire, "the command center (called off)")
 end
 
 -- Apply suppression at a point (amount in severity units). Returns the
@@ -2390,6 +2438,17 @@ local function closeEvent(sc, evt)
   if evt.gname then CIV.despawnGroup(evt.gname) end
 end
 
+-- command center: close an event without any outcome
+function R.cancel(evt)
+  local sc = R._scenarios[evt.scKey]
+  if sc and sc.events[evt.id] then
+    if evt.watch then CIV.Hover.unwatch(evt.watch) end
+    closeEvent(sc, evt)
+    return true
+  end
+  return false
+end
+
 -- reference point/name for the low-precision initial report: the scenario
 -- region if defined, otherwise the nearest hospital pad
 local function vagueReference(def, point)
@@ -2406,27 +2465,44 @@ local function vagueReference(def, point)
   return nil, nil
 end
 
-function R.startEvent(key)
+-- opts (command center): { point = vec3, severity = 1..10 }
+function R.startEvent(key, opts)
   local sc = R._scenarios[key]
   if not sc then return nil end
   local def = sc.def
   local n = 0
   for _ in pairs(sc.events) do n = n + 1 end
-  if n >= def.maxActive then return nil end
+  if not (opts and opts.point) and n >= def.maxActive then return nil end
 
-  local pt = CIV.Pool.pick(def.poolPrefix, 1000)
-  if not pt then
-    CIV.dbg("Rescue " .. key .. ": no free point in pool " .. def.poolPrefix)
-    return nil
+  local pt
+  if opts and opts.point then
+    -- commanded position instead of the curated pool
+    if def.kind == "boat" and not CIV.isWater(opts.point) then
+      CIV.msgAll(def.label .. ": commanded position is not on open water.", 10)
+      return nil
+    end
+    sc._gmid = (sc._gmid or 0) + 1
+    pt = {
+      name = "GM " .. def.key .. " " .. sc._gmid, radius = 100,
+      point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
+    }
+  else
+    pt = CIV.Pool.pick(def.poolPrefix, 1000)
+    if not pt then
+      CIV.dbg("Rescue " .. key .. ": no free point in pool " .. def.poolPrefix)
+      return nil
+    end
   end
 
   sc._eid = sc._eid + 1
   -- one severity roll shapes the whole event: deadline, hover envelope, score
-  local sev = CIV.rollSeverity(def.severityRange)
+  local sev = (opts and opts.severity)
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity(def.severityRange)
   local se = C.rescue.severityEffects
   local evt = {
     id = sc._eid, pt = pt, point = pt.point,
-    severity = sev,
+    severity = sev, scKey = def.key,
     spawnTime = timer.getTime(),
   }
   if def.deadline then
@@ -2892,18 +2968,34 @@ local function assignRoute(chase)
   g:getController():setTask({ id = "Mission", params = { route = { points = points } } })
 end
 
-function PL.startChase()
+-- opts (command center): { point = vec3, severity = 1..10 }. A commanded
+-- point snaps to the nearest free crossroad of the pool (the chase needs
+-- the road network).
+function PL.startChase(opts)
   local n = 0
   for _ in pairs(PL._chases) do n = n + 1 end
-  if n >= CP.maxChases then return nil end
+  if not (opts and opts.point) and n >= CP.maxChases then return nil end
 
-  local start = CIV.Pool.pick(C.zones.policePoints, 800)
+  local start
+  if opts and opts.point then
+    local bestDist = 1e12
+    for _, pt in ipairs(CIV.Pool.load(C.zones.policePoints)) do
+      local d = CIV.dist2D(pt.point, opts.point)
+      if d < bestDist and not CIV.Pool._active[pt.name] then
+        start, bestDist = pt, d
+      end
+    end
+  else
+    start = CIV.Pool.pick(C.zones.policePoints, 800)
+  end
   if not start then return nil end
 
   PL._cid = PL._cid + 1
   -- one severity roll shapes the chase: car speed, pressure rates, convoy
   -- size and score (severity 10 = fast car, slow pressure build, 2 vehicles)
-  local sev = CIV.rollSeverity(CP.severity)
+  local sev = (opts and opts.severity)
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity(CP.severity)
   local cars = sev >= CP.convoySeverity and 2 or 1
   local gname = CIV.spawnGround(start.point, cars, C.templates.fugitive,
     C.fallbackTypes.fugitive, "CIVIL_FUGITIVE")
@@ -2942,6 +3034,11 @@ local function closeChase(chase, despawnAfter)
   PL._chases[chase.id] = nil
   local gname = chase.gname
   CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 60)
+end
+
+-- command center: close a chase without any outcome
+function PL.cancel(chase)
+  closeChase(chase, 1)
 end
 
 -- chase loop: pressure + route extension + "On Road" watchdog
@@ -3076,12 +3173,25 @@ local function boardTeam(uname)
   end, nil, CS.boardingTime)
 end
 
-function SW.startScenario()
-  local pt = CIV.Pool.pick(C.zones.swatPoints, 500)
+-- opts (command center): { point = vec3, severity = 1..10 }
+function SW.startScenario(opts)
+  local pt
+  if opts and opts.point then
+    SW._gmid = (SW._gmid or 0) + 1
+    pt = {
+      name = "GM SWAT " .. SW._gmid, radius = 60,
+      point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
+    }
+  else
+    pt = CIV.Pool.pick(C.zones.swatPoints, 500)
+  end
   if not pt then return nil end
   SW._sid = SW._sid + 1
   -- one severity roll shapes the scenario: operators required, resolve time, score
-  local scen = { id = SW._sid, pt = pt, severity = CIV.rollSeverity(CS.severity) }
+  local scen = { id = SW._sid, pt = pt,
+    severity = (opts and opts.severity)
+      and math.max(1, math.min(10, opts.severity))
+      or CIV.rollSeverity(CS.severity) }
   SW._scenarios[scen.id] = scen
   CIV.Pool.occupy(pt)
   scen.circleId = CIV.drawEventZone(pt.area, "SWAT objective #" .. scen.id, "swat")
@@ -3131,6 +3241,16 @@ function SW.startScenario()
     "\n" .. CIV.coordText(pt.point) ..
     "\nBoard a team at the base and insert it via fast-rope.", 25)
   return scen
+end
+
+-- command center: close a scenario without any outcome
+function SW.cancel(scen)
+  if not SW._scenarios[scen.id] then return false end
+  if scen.watch then CIV.Hover.unwatch(scen.watch) end
+  CIV.unmark(scen.circleId)
+  CIV.Pool.release(scen.pt)
+  SW._scenarios[scen.id] = nil
+  return true
 end
 
 ----------------------------------------------------------------------
@@ -3210,19 +3330,31 @@ end
 -- ACTIVE LOADING POINTS
 ----------------------------------------------------------------------
 
-function CG.startPoint(forcedTier)
+-- opts (command center): { point = vec3, priority = 1..10 }
+function CG.startPoint(forcedTier, opts)
   local n = 0
   for _ in pairs(CG._points) do n = n + 1 end
-  if n >= CC.maxActive then return nil end
+  if not (opts and opts.point) and n >= CC.maxActive then return nil end
 
-  local pt = CIV.Pool.pick(C.zones.cargoPoints, 800)
+  local pt
+  if opts and opts.point then
+    CG._gmid = (CG._gmid or 0) + 1
+    pt = {
+      name = "GM cargo " .. CG._gmid, radius = 100,
+      point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
+    }
+  else
+    pt = CIV.Pool.pick(C.zones.cargoPoints, 800)
+  end
   if not pt then return nil end
 
   local tier = forcedTier or randomTier()
   CG._pid = CG._pid + 1
   -- delivery priority (transport flavor of the severity scale): one roll
   -- per point, drives the score multiplier and the time to live
-  local priority = CIV.rollSeverity(CC.priority)
+  local priority = (opts and opts.priority)
+    and math.max(1, math.min(10, opts.priority))
+    or CIV.rollSeverity(CC.priority)
   local point = {
     id = CG._pid, pt = pt, tier = tier,
     priority = priority,
@@ -3252,6 +3384,14 @@ local function closePoint(point)
   CIV.unmark(point.zoneMarkId)
   CIV.Pool.release(point.pt)
   CG._points[point.id] = nil
+end
+
+-- command center: close a loading point without any outcome
+function CG.cancel(point)
+  if not CG._points[point.id] then return false end
+  if point.cargoName then CIV.despawnStatic(point.cargoName) end
+  closePoint(point)
+  return true
 end
 
 ----------------------------------------------------------------------
@@ -3472,3 +3612,317 @@ end)
 CIV.EventStarters.transport = { label = "Transport point", fn = CG.startPoint }
 
 CIV.log("CivilTransport loaded")
+
+-- ====================================================================
+-- >>> Scripts/50_CivilCommand.lua
+-- ====================================================================
+----------------------------------------------------------------------
+-- DCS Civil Mission Template — Command Center (game-master console)
+-- File: 50_CivilCommand.lua  (requires 01_CivilCore.lua and the
+-- intervention files; load LAST)
+--
+-- Marker-driven mission control for a player acting as the emergency
+-- command center, intended for a Game Master / Tactical Commander slot
+-- (full F10 map, SRS; with Combined Arms they also get native asset
+-- control). Marker commands work from ANY slot though.
+--
+-- Usage: place an F10 map marker whose text starts with the configured
+-- prefix (default "civil"), at the position where the effect should
+-- happen. The marker is consumed (removed) once executed.
+--
+--   civil fire [sev]          wildfire at the marker
+--   civil sarm [sev]          mountain SAR subject at the marker
+--   civil sars [sev]          sea SAR subject at the marker (must be water)
+--   civil medevac [sev]       MedEvac casualty at the marker
+--   civil casevac [sev]       battlefield casualty at the marker
+--   civil swat [sev]          SWAT objective at the marker
+--   civil chase [sev]         chase from the crossroad nearest the marker
+--   civil cargo [tier] [pri]  loading point at the marker (tier: light/
+--                             medium/heavy/heavy_lift)
+--   civil spawn <tpl> [n]     clone a late-activated template whose name
+--                             contains <tpl> at the marker (n units)
+--   civil move <grp> [spd] [road]  route the ME ground/ship group whose
+--                             name contains <grp> to the marker
+--   civil cancel              cancel the nearest active event
+--   civil director on|off     toggle the automatic event director
+--   civil help                list the commands
+--
+-- NOTE (to validate in-game): marker events from Game Master / Combined
+-- Arms slots may carry no readable initiator; with restrict.enabled the
+-- allowUnidentified flag decides whether such marks are accepted.
+----------------------------------------------------------------------
+
+assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
+
+local C = CIV.Config
+local CMD = C.command
+
+CIV.Command = {}
+
+----------------------------------------------------------------------
+-- PERMISSIONS
+----------------------------------------------------------------------
+
+local function allowed(event)
+  if not CMD.restrict.enabled then return true end
+  local name = nil
+  if event.initiator then
+    local ok, n = pcall(function() return event.initiator:getPlayerName() end)
+    if ok then name = n end
+  end
+  if not name then return CMD.restrict.allowUnidentified end
+  for _, allowedName in ipairs(CMD.restrict.playerNames) do
+    if allowedName == name then return true end
+  end
+  return false
+end
+
+----------------------------------------------------------------------
+-- COMMAND IMPLEMENTATIONS
+----------------------------------------------------------------------
+
+local function say(text)
+  CIV.msgAll("COMMAND CENTER: " .. text, 12)
+end
+
+local function toSeverity(token)
+  local n = tonumber(token)
+  if n then return math.max(1, math.min(10, math.floor(n))) end
+  return nil
+end
+
+local function findTemplate(fragment)
+  fragment = string.lower(fragment)
+  for _, tpl in ipairs(CIV.Templates._groups) do
+    if string.find(string.lower(tpl.name), fragment, 1, true) then return tpl end
+  end
+  return nil
+end
+
+local function findGroup(fragment)
+  fragment = string.lower(fragment)
+  -- exact name first, then fragment search over the ME group list
+  local g = Group.getByName(fragment)
+  if g and g:getUnit(1) then return g, fragment, nil end
+  for _, entry in ipairs(CIV.MissionGroups) do
+    if string.find(string.lower(entry.name), fragment, 1, true) then
+      local grp = Group.getByName(entry.name)
+      if grp and grp:getUnit(1) and grp:getUnit(1):isExist() then
+        return grp, entry.name, entry.category
+      end
+    end
+  end
+  return nil
+end
+
+-- nearest active event of any kind within cancelRadius
+local function cancelNearest(point)
+  local best, bestDist = nil, CMD.cancelRadius
+  local function consider(p, label, fn)
+    local d = CIV.dist2D(p, point)
+    if d < bestDist then best, bestDist = { label = label, fn = fn }, d end
+  end
+  for _, fire in pairs(CIV.Fire.actives()) do
+    consider(fire.point, "wildfire at " .. fire.pt.name,
+      function() CIV.Fire.callOff(fire) end)
+  end
+  for _, sc in pairs(CIV.Rescue._scenarios) do
+    for _, evt in pairs(sc.events) do
+      consider(evt.point, sc.def.label .. " #" .. evt.id,
+        function() CIV.Rescue.cancel(evt) end)
+    end
+  end
+  for _, chase in pairs(CIV.Police._chases) do
+    local g = Group.getByName(chase.gname)
+    local u = g and g:getUnit(1)
+    if u and u:isExist() then
+      consider(u:getPoint(), "police chase #" .. chase.id,
+        function() CIV.Police.cancel(chase) end)
+    end
+  end
+  for _, scen in pairs(CIV.SWAT._scenarios) do
+    consider(scen.pt.point, "SWAT objective at " .. scen.pt.name,
+      function() CIV.SWAT.cancel(scen) end)
+  end
+  for _, pt in pairs(CIV.Cargo._points) do
+    consider(pt.pt.point, "loading point at " .. pt.pt.name,
+      function() CIV.Cargo.cancel(pt) end)
+  end
+  if best then
+    best.fn()
+    say("cancelled: " .. best.label .. ".")
+  else
+    say("no active event within " .. math.floor(CMD.cancelRadius / 1000) .. " km of the marker.")
+  end
+end
+
+local commands = {}
+
+commands.fire = function(args, point)
+  local fire = CIV.Fire.igniteAt(point, toSeverity(args[1]))
+  if not fire then say("fire command failed.") end
+end
+
+local rescueKeys = { sarm = "SAR_MOUNTAIN", sars = "SAR_SEA",
+                     medevac = "MEDEVAC", casevac = "CASEVAC" }
+for word, key in pairs(rescueKeys) do
+  commands[word] = function(args, point)
+    if not CIV.Rescue.startEvent(key, { point = point, severity = toSeverity(args[1]) }) then
+      say(word .. " command failed (check the position).")
+    end
+  end
+end
+
+commands.swat = function(args, point)
+  if not CIV.SWAT.startScenario({ point = point, severity = toSeverity(args[1]) }) then
+    say("swat command failed.")
+  end
+end
+
+commands.chase = function(args, point)
+  if not CIV.Police.startChase({ point = point, severity = toSeverity(args[1]) }) then
+    say("chase command failed (no free crossroad in the police pool).")
+  end
+end
+
+commands.cargo = function(args, point)
+  local tier = args[1] and string.upper(args[1])
+  if tier and not C.cargo.tiers[tier] then
+    say("unknown tier '" .. args[1] .. "' (light/medium/heavy/heavy_lift).")
+    return
+  end
+  if not CIV.Cargo.startPoint(tier, { point = point, priority = toSeverity(args[2]) }) then
+    say("cargo command failed.")
+  end
+end
+
+commands.spawn = function(args, point)
+  if not args[1] then
+    say("usage: " .. CMD.markerPrefix .. " spawn <template fragment> [count]")
+    return
+  end
+  local tpl = findTemplate(args[1])
+  if not tpl then
+    say("no late-activated template matching '" .. args[1] .. "'.")
+    return
+  end
+  local count = tonumber(args[2])
+  local name = CIV.spawnFromTemplate(tpl.name, point, count and math.floor(count) or nil)
+  if name then
+    say("spawned '" .. tpl.name .. "' at the marker.")
+  else
+    say("spawn failed.")
+  end
+end
+
+commands.move = function(args, point)
+  if not args[1] then
+    say("usage: " .. CMD.markerPrefix .. " move <group fragment> [speed] [road]")
+    return
+  end
+  local grp, gname, category = findGroup(args[1])
+  if not grp then
+    say("no alive ME group matching '" .. args[1] .. "'.")
+    return
+  end
+  if category == "plane" or category == "helicopter" then
+    say("'" .. gname .. "' is an air group: move supports ground and ship groups only.")
+    return
+  end
+  local speed = tonumber(args[2]) or CMD.moveSpeed
+  local onRoad = false
+  for _, a in ipairs(args) do
+    if a == "road" then onRoad = true end
+  end
+  local wp = { x = point.x, y = point.z, type = "Turning Point", speed = speed }
+  if category == "vehicle" or category == nil then
+    wp.action = onRoad and "On Road" or "Off Road"
+  end
+  local ok = pcall(function()
+    grp:getController():setTask({ id = "Mission", params = { route = { points = { wp } } } })
+  end)
+  say(ok and ("'" .. gname .. "' moving to the marker (" .. speed .. " m/s"
+      .. (wp.action and (", " .. wp.action) or "") .. ").")
+    or ("failed to task '" .. gname .. "'."))
+end
+
+commands.cancel = function(_, point)
+  cancelNearest(point)
+end
+
+commands.director = function(args)
+  if args[1] == "on" then
+    C.director.enabled = true
+    say("automatic director ENABLED.")
+  elseif args[1] == "off" then
+    C.director.enabled = false
+    say("automatic director DISABLED: the command center is directing.")
+  else
+    say("director is " .. (C.director.enabled and "ON" or "OFF") ..
+      " (use: " .. CMD.markerPrefix .. " director on|off).")
+  end
+end
+
+commands.help = function()
+  say("marker commands:\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase [severity]\n" ..
+    CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
+    CMD.markerPrefix .. " spawn <template> [count]  |  " ..
+    CMD.markerPrefix .. " move <group> [speed] [road]\n" ..
+    CMD.markerPrefix .. " cancel  |  " ..
+    CMD.markerPrefix .. " director on|off")
+end
+
+----------------------------------------------------------------------
+-- MARKER EVENT HANDLER
+-- Commands are parsed from S_EVENT_MARK_ADDED / S_EVENT_MARK_CHANGE
+-- (the CHANGE event covers text typed after placing the mark). Each
+-- mark id + text pair is executed once.
+----------------------------------------------------------------------
+
+local processed = {}   -- mark idx -> last executed text
+
+local function onMark(event)
+  if not (event.text and event.pos) then return end
+  if processed[event.idx] == event.text then return end
+  local text = string.lower(event.text)
+  local rest = string.match(text, "^%s*" .. CMD.markerPrefix .. "%s+(.+)$")
+  if not rest then return end
+  processed[event.idx] = event.text
+  if not allowed(event) then
+    say("command refused: player not authorized.")
+    return
+  end
+  local args = {}
+  for token in string.gmatch(rest, "%S+") do args[#args + 1] = token end
+  local cmd = table.remove(args, 1)
+  local point = { x = event.pos.x, y = event.pos.y or 0, z = event.pos.z }
+  local handler = commands[cmd]
+  if not handler then
+    say("unknown command '" .. tostring(cmd) .. "' (try: " ..
+      CMD.markerPrefix .. " help).")
+    return
+  end
+  CIV.log("Command marker: " .. event.text)
+  local ok, err = pcall(handler, args, point)
+  if not ok then say("command error: " .. tostring(err)) end
+  if CMD.removeMarks then
+    local idx = event.idx
+    CIV.schedule(function() pcall(trigger.action.removeMark, idx) end, nil, 2)
+  end
+end
+
+if CMD.enabled then
+  local markHandler = {}
+  function markHandler:onEvent(event)
+    if event.id == world.event.S_EVENT_MARK_ADDED
+       or event.id == world.event.S_EVENT_MARK_CHANGE then
+      local ok, err = pcall(onMark, event)
+      if not ok then CIV.log("Marker command error: " .. tostring(err)) end
+    end
+  end
+  world.addEventHandler(markHandler)
+  CIV.log("CivilCommand loaded: marker prefix '" .. CMD.markerPrefix .. "'")
+else
+  CIV.log("CivilCommand disabled by config")
+end

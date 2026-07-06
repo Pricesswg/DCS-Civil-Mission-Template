@@ -396,6 +396,32 @@ CIV.Config = {
   },
 
   ------------------------------------------------------------------
+  -- Command center: game-master driven mission control via F10 map
+  -- markers. Intended for a player in a Game Master / Tactical Commander
+  -- slot (full map view, SRS, native asset control with Combined Arms),
+  -- but commands work from ANY slot. Place a marker whose text starts
+  -- with markerPrefix, e.g.:
+  --   civil fire 7        civil medevac 9      civil casevac
+  --   civil sarm 5        civil sars           civil swat 8
+  --   civil chase 6       civil cargo heavy 9
+  --   civil spawn <template fragment> [count]
+  --   civil move <group fragment> [speed] [road]
+  --   civil cancel        civil director on|off      civil help
+  ------------------------------------------------------------------
+  command = {
+    enabled = true,
+    markerPrefix = "civil",   -- marker text prefix (case-insensitive)
+    removeMarks = true,       -- delete the command marker once executed
+    cancelRadius = 15000,     -- m, "civil cancel" hits the nearest event within this
+    moveSpeed = 10,           -- m/s default for "civil move"
+    restrict = {
+      enabled = false,        -- true = only playerNames below may issue commands
+      playerNames = {},
+      allowUnidentified = true, -- GM/CA slots can produce marks with no readable initiator
+    },
+  },
+
+  ------------------------------------------------------------------
   -- F10 map drawing. Colors are { r, g, b, alpha } with 0..1 values.
   -- Circular zones are drawn with circleToAll; polygon zones with
   -- markupToAll (freeform shape), so the real perimeter is shown.
@@ -590,6 +616,7 @@ CIV.Zones = { _areas = {} }        -- list of { name, kind, center={x,z}, radius
 CIV.Templates = { _groups = {} }   -- list of { name, countryId, category, categoryEnum, data }
 CIV.Ships = {}                     -- every ship unit in the mission: { unitName, groupName }
                                    -- (rescue vessels and mobile hospital ships are found here by prefix)
+CIV.MissionGroups = {}             -- every ME group: { name, category } ("civil move" fragment search)
 CIV._ids = { group = 900000, unit = 900000, mark = 950000 }
 
 function CIV.startsWith(s, prefix)
@@ -693,6 +720,7 @@ local function loadTemplates()
                       data = deepCopy(g),
                     }
                   end
+                  CIV.MissionGroups[#CIV.MissionGroups + 1] = { name = g.name, category = cat }
                   if cat == "ship" and not g.lateActivation and type(g.units) == "table" then
                     for _, u in pairs(g.units) do
                       if u.name then
@@ -1451,14 +1479,17 @@ end
 
 CIV.EventStarters = {}
 
+-- Keeps rescheduling even while disabled, so the command center can turn
+-- the automatic director off and on again at runtime ("civil director on").
 CIV.schedule(function(_, t)
   local cfg = CIV.Config.director
-  if not cfg.enabled then return nil end
-  for key, chance in pairs(cfg.chance) do
-    local starter = CIV.EventStarters[key]
-    if starter and math.random(100) <= chance then
-      local ok, err = pcall(starter.fn)
-      if not ok then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
+  if cfg.enabled then
+    for key, chance in pairs(cfg.chance) do
+      local starter = CIV.EventStarters[key]
+      if starter and math.random(100) <= chance then
+        local ok, err = pcall(starter.fn)
+        if not ok then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
+      end
     end
   end
   return t + CIV.randBetween(cfg.interval)

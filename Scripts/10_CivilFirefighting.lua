@@ -91,12 +91,14 @@ local function refreshVisuals(fire)
   end
 end
 
-function Fire.ignite(pt)
+function Fire.ignite(pt, severityOverride)
   Fire._fid = Fire._fid + 1
   local fire = {
     id = Fire._fid, pt = pt,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
-    severity = math.random(SEV.initial.min, SEV.initial.max),
+    severity = severityOverride
+      and math.max(1, math.min(SEV.max, severityOverride))
+      or math.random(SEV.initial.min, SEV.initial.max),
     growEvery = CIV.randBetween(SEV.growEvery),   -- fixed for the fire's lifetime
     smokeName = "CIVIL_FIRE_" .. Fire._fid,
     effects = {}, markId = nil,
@@ -122,6 +124,16 @@ function Fire.igniteRandom()
   return Fire.ignite(pt)
 end
 
+-- command center: ignite at an arbitrary commanded position
+function Fire.igniteAt(point, severity)
+  Fire._fid = Fire._fid + 1
+  local pt = {
+    name = "GM fire " .. Fire._fid, radius = 150,
+    point = { x = point.x, y = CIV.groundY(point), z = point.z },
+  }
+  return Fire.ignite(pt, severity)
+end
+
 local function extinguish(fire, byWhom)
   for _, eff in ipairs(fire.effects) do
     trigger.action.effectSmokeStop(eff.name)
@@ -134,6 +146,11 @@ local function extinguish(fire, byWhom)
   releaseFireTrucks(fire)
   CIV.msgAll("Fire at " .. fire.pt.name .. " EXTINGUISHED" ..
     (byWhom and (" by " .. byWhom) or "") .. ".", 15)
+end
+
+-- command center: call a fire off without scoring
+function Fire.callOff(fire)
+  extinguish(fire, "the command center (called off)")
 end
 
 -- Apply suppression at a point (amount in severity units). Returns the

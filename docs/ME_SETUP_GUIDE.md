@@ -28,9 +28,10 @@ be omitted):
 ```
 Scripts/01_CivilCore.lua        <- ALWAYS, first
 Scripts/10_CivilFirefighting.lua
-Scripts/20_CivilRescue.lua      (SAR mountain/sea + MedEvac)
+Scripts/20_CivilRescue.lua      (SAR mountain/sea + MedEvac + CASEVAC)
 Scripts/30_CivilPolice.lua      (chase + SWAT)
 Scripts/40_CivilTransport.lua
+Scripts/50_CivilCommand.lua     <- LAST (game-master marker commands)
 ```
 
 After any change inside `Scripts/`, regenerate the single file with

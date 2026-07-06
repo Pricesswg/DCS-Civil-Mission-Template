@@ -133,6 +133,15 @@ These match the concept's list; each item ships with an escape route.
   region or flies within `rescue.intel.spotterDetectRadius` of the subject.
   Survivor smoke on request remains as the close-range aid.
 
+12. **Game-master marker commands** — `S_EVENT_MARK_ADDED`/`MARK_CHANGE`
+    are native and documented, but two things need an in-game pass: whether
+    marks placed from a Game Master / Tactical Commander slot deliver the
+    events with a readable initiator (affects the optional player-name
+    whitelist: `allowUnidentified` covers the nil case), and whether the
+    mark text arrives on ADDED or only on the first CHANGE after typing
+    (both are handled). The `civil move` command intentionally supports
+    ground/ship groups only.
+
 ## Severity generalization (v0.2)
 
 The fire severity scale (1-10) is generalized to every event type as the

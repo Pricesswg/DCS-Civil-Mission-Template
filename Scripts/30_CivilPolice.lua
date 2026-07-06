@@ -66,18 +66,34 @@ local function assignRoute(chase)
   g:getController():setTask({ id = "Mission", params = { route = { points = points } } })
 end
 
-function PL.startChase()
+-- opts (command center): { point = vec3, severity = 1..10 }. A commanded
+-- point snaps to the nearest free crossroad of the pool (the chase needs
+-- the road network).
+function PL.startChase(opts)
   local n = 0
   for _ in pairs(PL._chases) do n = n + 1 end
-  if n >= CP.maxChases then return nil end
+  if not (opts and opts.point) and n >= CP.maxChases then return nil end
 
-  local start = CIV.Pool.pick(C.zones.policePoints, 800)
+  local start
+  if opts and opts.point then
+    local bestDist = 1e12
+    for _, pt in ipairs(CIV.Pool.load(C.zones.policePoints)) do
+      local d = CIV.dist2D(pt.point, opts.point)
+      if d < bestDist and not CIV.Pool._active[pt.name] then
+        start, bestDist = pt, d
+      end
+    end
+  else
+    start = CIV.Pool.pick(C.zones.policePoints, 800)
+  end
   if not start then return nil end
 
   PL._cid = PL._cid + 1
   -- one severity roll shapes the chase: car speed, pressure rates, convoy
   -- size and score (severity 10 = fast car, slow pressure build, 2 vehicles)
-  local sev = CIV.rollSeverity(CP.severity)
+  local sev = (opts and opts.severity)
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity(CP.severity)
   local cars = sev >= CP.convoySeverity and 2 or 1
   local gname = CIV.spawnGround(start.point, cars, C.templates.fugitive,
     C.fallbackTypes.fugitive, "CIVIL_FUGITIVE")
@@ -116,6 +132,11 @@ local function closeChase(chase, despawnAfter)
   PL._chases[chase.id] = nil
   local gname = chase.gname
   CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 60)
+end
+
+-- command center: close a chase without any outcome
+function PL.cancel(chase)
+  closeChase(chase, 1)
 end
 
 -- chase loop: pressure + route extension + "On Road" watchdog
@@ -250,12 +271,25 @@ local function boardTeam(uname)
   end, nil, CS.boardingTime)
 end
 
-function SW.startScenario()
-  local pt = CIV.Pool.pick(C.zones.swatPoints, 500)
+-- opts (command center): { point = vec3, severity = 1..10 }
+function SW.startScenario(opts)
+  local pt
+  if opts and opts.point then
+    SW._gmid = (SW._gmid or 0) + 1
+    pt = {
+      name = "GM SWAT " .. SW._gmid, radius = 60,
+      point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
+    }
+  else
+    pt = CIV.Pool.pick(C.zones.swatPoints, 500)
+  end
   if not pt then return nil end
   SW._sid = SW._sid + 1
   -- one severity roll shapes the scenario: operators required, resolve time, score
-  local scen = { id = SW._sid, pt = pt, severity = CIV.rollSeverity(CS.severity) }
+  local scen = { id = SW._sid, pt = pt,
+    severity = (opts and opts.severity)
+      and math.max(1, math.min(10, opts.severity))
+      or CIV.rollSeverity(CS.severity) }
   SW._scenarios[scen.id] = scen
   CIV.Pool.occupy(pt)
   scen.circleId = CIV.drawEventZone(pt.area, "SWAT objective #" .. scen.id, "swat")
@@ -305,6 +339,16 @@ function SW.startScenario()
     "\n" .. CIV.coordText(pt.point) ..
     "\nBoard a team at the base and insert it via fast-rope.", 25)
   return scen
+end
+
+-- command center: close a scenario without any outcome
+function SW.cancel(scen)
+  if not SW._scenarios[scen.id] then return false end
+  if scen.watch then CIV.Hover.unwatch(scen.watch) end
+  CIV.unmark(scen.circleId)
+  CIV.Pool.release(scen.pt)
+  SW._scenarios[scen.id] = nil
+  return true
 end
 
 ----------------------------------------------------------------------

@@ -18,6 +18,7 @@ Scripts/
                             hospital ships (shared rescue engine)
   30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
   40_CivilTransport.lua     Fixed mass tiers + supply airdrops
+  50_CivilCommand.lua       Command center: game-master marker commands
 dist/
   CivilMissionTemplate.lua  Single-file build; regenerate with tools/build.sh
 tools/build.sh              Concatenates Scripts/ into the single-file build
@@ -100,6 +101,27 @@ parameters derive, announced in every report ("MedEvac severity 8"):
 | Transport ("priority") | time to live of the load (priority 10 expires in 45 min) and score |
 
 Score multiplier is anchored at `×(0.7 + 0.06·severity)` — severity 5 = ×1.
+
+## Command center (game master)
+
+A player in a **Game Master / Tactical Commander slot** (full F10 map, SRS;
+native asset control with Combined Arms) acts as the emergency command
+center by placing **F10 map markers** whose text starts with `civil` — the
+commands work from any slot and the marker position IS the target position:
+
+```
+civil fire 7          civil medevac 9        civil casevac
+civil sarm 5          civil sars             civil swat 8
+civil chase 6         civil cargo heavy 9
+civil spawn <template fragment> [count]
+civil move <group fragment> [speed] [road]     (ground/ship, no CA needed)
+civil cancel          civil director on|off    civil help
+```
+
+`civil director off` pauses the automatic event generation while the
+commander directs the session. Optional player-name whitelist in
+`CIV.Config.command.restrict`. Marker behavior from GM slots is TO VALIDATE
+in-game (see FEASIBILITY).
 
 Fire suppression (in severity units): helicopter drop −2, C-130 line
 −0.25/s, retardant drum −2/container, fire brigade on scene −0.6/min. The

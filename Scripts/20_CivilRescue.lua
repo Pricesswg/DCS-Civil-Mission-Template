@@ -205,6 +205,17 @@ local function closeEvent(sc, evt)
   if evt.gname then CIV.despawnGroup(evt.gname) end
 end
 
+-- command center: close an event without any outcome
+function R.cancel(evt)
+  local sc = R._scenarios[evt.scKey]
+  if sc and sc.events[evt.id] then
+    if evt.watch then CIV.Hover.unwatch(evt.watch) end
+    closeEvent(sc, evt)
+    return true
+  end
+  return false
+end
+
 -- reference point/name for the low-precision initial report: the scenario
 -- region if defined, otherwise the nearest hospital pad
 local function vagueReference(def, point)
@@ -221,27 +232,44 @@ local function vagueReference(def, point)
   return nil, nil
 end
 
-function R.startEvent(key)
+-- opts (command center): { point = vec3, severity = 1..10 }
+function R.startEvent(key, opts)
   local sc = R._scenarios[key]
   if not sc then return nil end
   local def = sc.def
   local n = 0
   for _ in pairs(sc.events) do n = n + 1 end
-  if n >= def.maxActive then return nil end
+  if not (opts and opts.point) and n >= def.maxActive then return nil end
 
-  local pt = CIV.Pool.pick(def.poolPrefix, 1000)
-  if not pt then
-    CIV.dbg("Rescue " .. key .. ": no free point in pool " .. def.poolPrefix)
-    return nil
+  local pt
+  if opts and opts.point then
+    -- commanded position instead of the curated pool
+    if def.kind == "boat" and not CIV.isWater(opts.point) then
+      CIV.msgAll(def.label .. ": commanded position is not on open water.", 10)
+      return nil
+    end
+    sc._gmid = (sc._gmid or 0) + 1
+    pt = {
+      name = "GM " .. def.key .. " " .. sc._gmid, radius = 100,
+      point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
+    }
+  else
+    pt = CIV.Pool.pick(def.poolPrefix, 1000)
+    if not pt then
+      CIV.dbg("Rescue " .. key .. ": no free point in pool " .. def.poolPrefix)
+      return nil
+    end
   end
 
   sc._eid = sc._eid + 1
   -- one severity roll shapes the whole event: deadline, hover envelope, score
-  local sev = CIV.rollSeverity(def.severityRange)
+  local sev = (opts and opts.severity)
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity(def.severityRange)
   local se = C.rescue.severityEffects
   local evt = {
     id = sc._eid, pt = pt, point = pt.point,
-    severity = sev,
+    severity = sev, scKey = def.key,
     spawnTime = timer.getTime(),
   }
   if def.deadline then

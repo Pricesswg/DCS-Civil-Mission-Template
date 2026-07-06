@@ -52,19 +52,31 @@ end
 -- ACTIVE LOADING POINTS
 ----------------------------------------------------------------------
 
-function CG.startPoint(forcedTier)
+-- opts (command center): { point = vec3, priority = 1..10 }
+function CG.startPoint(forcedTier, opts)
   local n = 0
   for _ in pairs(CG._points) do n = n + 1 end
-  if n >= CC.maxActive then return nil end
+  if not (opts and opts.point) and n >= CC.maxActive then return nil end
 
-  local pt = CIV.Pool.pick(C.zones.cargoPoints, 800)
+  local pt
+  if opts and opts.point then
+    CG._gmid = (CG._gmid or 0) + 1
+    pt = {
+      name = "GM cargo " .. CG._gmid, radius = 100,
+      point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
+    }
+  else
+    pt = CIV.Pool.pick(C.zones.cargoPoints, 800)
+  end
   if not pt then return nil end
 
   local tier = forcedTier or randomTier()
   CG._pid = CG._pid + 1
   -- delivery priority (transport flavor of the severity scale): one roll
   -- per point, drives the score multiplier and the time to live
-  local priority = CIV.rollSeverity(CC.priority)
+  local priority = (opts and opts.priority)
+    and math.max(1, math.min(10, opts.priority))
+    or CIV.rollSeverity(CC.priority)
   local point = {
     id = CG._pid, pt = pt, tier = tier,
     priority = priority,
@@ -94,6 +106,14 @@ local function closePoint(point)
   CIV.unmark(point.zoneMarkId)
   CIV.Pool.release(point.pt)
   CG._points[point.id] = nil
+end
+
+-- command center: close a loading point without any outcome
+function CG.cancel(point)
+  if not CG._points[point.id] then return false end
+  if point.cargoName then CIV.despawnStatic(point.cargoName) end
+  closePoint(point)
+  return true
 end
 
 ----------------------------------------------------------------------
