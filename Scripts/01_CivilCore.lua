@@ -414,6 +414,10 @@ CIV.Config = {
     removeMarks = true,       -- delete the command marker once executed
     cancelRadius = 15000,     -- m, "civil cancel" hits the nearest event within this
     moveSpeed = 10,           -- m/s default for "civil move"
+    -- GM slots spawn no unit, so commander presence cannot be read from the
+    -- mission API: if the director was paused by the commander and no marker
+    -- command arrives for idleSeconds, the mission RESUMES automatic mode.
+    autoResume = { enabled = true, idleSeconds = 1800 },
     restrict = {
       enabled = false,        -- true = only playerNames below may issue commands
       playerNames = {},

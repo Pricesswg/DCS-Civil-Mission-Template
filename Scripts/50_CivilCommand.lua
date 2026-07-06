@@ -235,10 +235,15 @@ end
 commands.director = function(args)
   if args[1] == "on" then
     C.director.enabled = true
+    CIV.Command.pausedByCommand = false
     say("automatic director ENABLED.")
   elseif args[1] == "off" then
     C.director.enabled = false
-    say("automatic director DISABLED: the command center is directing.")
+    CIV.Command.pausedByCommand = true
+    say("automatic director DISABLED: the command center is directing. " ..
+      "Automatic mode resumes after " ..
+      math.floor(CMD.autoResume.idleSeconds / 60) ..
+      " minutes without commands.")
   else
     say("director is " .. (C.director.enabled and "ON" or "OFF") ..
       " (use: " .. CMD.markerPrefix .. " director on|off).")
@@ -286,6 +291,7 @@ local function onMark(event)
     return
   end
   CIV.log("Command marker: " .. event.text)
+  CIV.Command.lastCommandTime = timer.getTime()   -- commander activity signal
   local ok, err = pcall(handler, args, point)
   if not ok then say("command error: " .. tostring(err)) end
   if CMD.removeMarks then
@@ -304,6 +310,23 @@ if CMD.enabled then
     end
   end
   world.addEventHandler(markHandler)
+
+  -- Watchdog: if the commander paused the director and then went quiet
+  -- (left the slot, disconnected), the mission falls back to automatic
+  -- mode. Only fires on command-issued pauses: a director disabled in the
+  -- config stays disabled.
+  CIV.schedule(function(_, t)
+    local ar = CMD.autoResume
+    if ar.enabled and CIV.Command.pausedByCommand and not C.director.enabled
+       and timer.getTime() - (CIV.Command.lastCommandTime or 0) > ar.idleSeconds then
+      C.director.enabled = true
+      CIV.Command.pausedByCommand = false
+      say("no command activity for " .. math.floor(ar.idleSeconds / 60) ..
+        " minutes: resuming AUTOMATIC mode.")
+    end
+    return t + 60
+  end, nil, 60)
+
   CIV.log("CivilCommand loaded: marker prefix '" .. CMD.markerPrefix .. "'")
 else
   CIV.log("CivilCommand disabled by config")

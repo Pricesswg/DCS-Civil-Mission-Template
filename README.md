@@ -107,21 +107,36 @@ Score multiplier is anchored at `×(0.7 + 0.06·severity)` — severity 5 = ×1.
 A player in a **Game Master / Tactical Commander slot** (full F10 map, SRS;
 native asset control with Combined Arms) acts as the emergency command
 center by placing **F10 map markers** whose text starts with `civil` — the
-commands work from any slot and the marker position IS the target position:
+commands work from any slot and the marker position IS the target position.
+
+Worked examples (place the marker where you want the effect, type the text,
+the marker is consumed once executed):
 
 ```
-civil fire 7          civil medevac 9        civil casevac
-civil sarm 5          civil sars             civil swat 8
-civil chase 6         civil cargo heavy 9
-civil spawn <template fragment> [count]
-civil move <group fragment> [speed] [road]     (ground/ship, no CA needed)
-civil cancel          civil director on|off    civil help
+civil director off        take the wheel: automatic generation pauses
+civil fire 8              severity-8 wildfire right under the marker
+civil medevac 9           critical casualty there (~18 min of criticality)
+civil sars 6              castaway on that water position (vessels react)
+civil casevac             battlefield casualty, severity rolled randomly
+civil swat 7              SWAT objective there (needs ~7 operators)
+civil chase 9             fast two-car convoy from the nearest crossroad
+civil cargo heavy 9       urgent HEAVY load there (expires in ~45 min)
+civil spawn survivor 3    clone 3 units of the "CIVIL Survivor" template
+civil spawn truck         one "CIVIL Fire Truck" group at the marker
+civil move alpha 12 road  send the group matching "alpha" there at 12 m/s
+                          following roads (single-word fragment; no CA needed)
+civil cancel              call off the event nearest to the marker
+civil director on         hand back to automatic generation
+civil help                list the commands in game
 ```
 
-`civil director off` pauses the automatic event generation while the
-commander directs the session. Optional player-name whitelist in
-`CIV.Config.command.restrict`. Marker behavior from GM slots is TO VALIDATE
-in-game (see FEASIBILITY).
+While the commander directs (`civil director off`), automatic generation
+stays paused. **If the commander goes quiet — leaves the slot, disconnects,
+or simply stops issuing commands — the mission returns to AUTOMATIC mode by
+itself** after `command.autoResume.idleSeconds` (default 30 minutes) without
+marker commands: an unattended session never stays frozen. Optional
+player-name whitelist in `CIV.Config.command.restrict`. Marker behavior from
+GM slots is TO VALIDATE in-game (see FEASIBILITY).
 
 Fire suppression (in severity units): helicopter drop −2, C-130 line
 −0.25/s, retardant drum −2/container, fire brigade on scene −0.6/min. The

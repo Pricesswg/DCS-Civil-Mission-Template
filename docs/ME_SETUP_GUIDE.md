@@ -136,7 +136,23 @@ Set `marks.regions.enabled = false` or `marks.events.enabled = false` to
 turn either layer off; colors are `{ r, g, b, alpha }` tables in the same
 config block.
 
-## 7. In game
+## 7. Command center (game master)
+
+Use a Game Master / Tactical Commander slot and drive the mission with F10
+map markers (`civil ...` text, executed at the marker position — full
+examples in the README):
+
+```
+civil director off   civil fire 8   civil medevac 9   civil swat 7
+civil cargo heavy 9  civil spawn survivor 3   civil move alpha 12 road
+civil cancel         civil director on        civil help
+```
+
+If the commander goes quiet (leaves, disconnects, or stops commanding), the
+mission resumes AUTOMATIC mode by itself after
+`command.autoResume.idleSeconds` (default 30 min) without marker commands.
+
+## 8. In game
 
 `F10 → Civil Missions` menu:
 
@@ -167,7 +183,7 @@ config block.
   makes the impact location decide).
 - **Admin (test)** — manual start of every event, pool status.
 
-## 8. In-game test checklist (before serious use)
+## 9. In-game test checklist (before serious use)
 
 1. Pools and menus: start every event from the Admin menu and check
    messages/spawns.
