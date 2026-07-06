@@ -49,8 +49,9 @@ properties are read from `env.mission`.
 |---|---|---|
 | `CIVIL Fire Region` | firefighting macro-region | large; enables the spotter and the C-130 line drop |
 | `CIVIL Fire Point …` | fire ignition points | forest/fields, away from buildings and roads |
+| `CIVIL Fire Station …` | fire brigade depots | trucks depart from the nearest one and drive "On Road" to the fire |
 | `CIVIL Water Point …` | helicopter water pickup | on a body of water, with maneuvering room |
-| `CIVIL C130 Reload` | C-130 retardant reload | apron reachable on the ground; dressed with the loading kit |
+| `CIVIL C130 Reload` | C-130 retardant reload | apron reachable on the ground. USER-BUILT static area: decorate it yourself (`autoDress.c130Reload = false` by default) |
 | `CIVIL SAR Mountain Region` + `CIVIL SAR Mountain Point …` | mountain SAR | points reachable in a hover |
 | `CIVIL SAR Sea Region` + `CIVIL SAR Sea Point …` | sea SAR | points on OPEN water (a boat spawns there) |
 | `CIVIL Police Point …` | chase | 30-40 points ON real crossroads, neighbor distance ≤ 1500 m |
@@ -59,8 +60,8 @@ properties are read from `env.mission`.
 | `CIVIL Cargo Point …` | cargo loading points | flat ground |
 | `CIVIL Cargo Destination` | cargo delivery | single destination zone |
 | `CIVIL Medevac Point …` | casualty recovery | "hostile"/accident LZs |
-| `CIVIL Casevac Point …` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin) |
-| `CIVIL Hospital …` | hospital pads | on the actual pad; dressed with the medical camp kit; delivery is ZONE-detected (still+low), no FARP needed |
+| `CIVIL Casevac Point …` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
+| `CIVIL Hospital …` | hospital pads | on the actual pad; auto-dressed with the medical camp kit (`autoDress.hospitals = false` to disable); delivery is ZONE-detected (still+low), no FARP needed |
 | `CIVIL Vessel Spawn …` | rescue boat harbors | on open water near a harbor. BALANCE RULE: place them so that distance / boat speed (9 m/s ≈ 17.5 kts) is slightly LONGER than the sea SAR hover window (default 25 min ≈ 13.5 km) — the boat is the second chance, not a competitor to the helicopter |
 
 Prefixes are configurable in `CIV.Config.zones` (top of `01_CivilCore.lua`).
@@ -79,6 +80,7 @@ types. Group-name prefix matching:
 | `CIVIL Vessel …` | spawned rescue boat (ship) | `speedboat` |
 | `CIVIL SWAT Team …` | SWAT squad (ground; unit count scaled at insertion) | `Soldier M4` |
 | `CIVIL Fugitive …` | fleeing car (vehicle) | `LandRover_ah` |
+| `CIVIL Fire Truck …` | fire brigade truck (vehicle) | `HEMTT TFFT` |
 
 ## 4b. Ships (regular units placed in the ME, matched by name prefix)
 
@@ -107,6 +109,10 @@ At the top of `01_CivilCore.lua` (`CIV.Config`):
 - `hover.*`: T times / windows per operation type.
 - `rescue.intel`: approximate-circle radius and the spotter detection range
   used to release exact rescue coordinates.
+- `autoDress`: which fixed zones get automatic scenery (reload apron off by
+  default — user-built; hospital pads on by default).
+- `fire.severity` / `fire.trucks`: fire growth pacing, effect cap, brigade
+  size/speed/suppression rate.
 - `director`: probabilities/intervals of automatic event generation (or
   `enabled = false` and start everything from the Admin menu).
 - `adminMenu = false` for official events.
@@ -134,7 +140,12 @@ config block.
 `F10 → Civil Missions` menu:
 
 - **Session leaderboard** — shared live score.
-- **Firefighting** — water pickup / drop / active fires.
+- **Firefighting** — water pickup / drop / active fires (with severity and
+  brigade status). Fires carry a severity 1-10: they spawn small (single
+  effect), grow on a random per-fire cadence and spread visually (more
+  smoke/fire effects, capped for performance). Fire trucks roll out of the
+  nearest station automatically and suppress from the ground once on scene,
+  reducing the air passes needed.
 - **Firefighting C-130** — loading is opt-in: taking off clean and orbiting
   as spotter/rescue support needs no interaction. `Load retardant` at the
   reload zone starts a 2-minute hold (moving aborts it), then `Start line

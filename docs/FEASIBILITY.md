@@ -49,6 +49,13 @@ These match the concept's list; each item ships with an escape route.
    "zone + nearest player" delivery (already used by rescue).
 3. **"On Road" on the chosen map's real crossroads** — watchdog and fallback
    included, but the 30-40 point pool must be validated crossing by crossing.
+   The same watchdog covers the FIRE TRUCKS driving from station to fire;
+   validate the station→fire-points road runs too, and the truck fallback
+   type name (`HEMTT TFFT`).
+   Note on fire visuals: severity spawns up to `fire.severity.maxEffects`
+   (default 5) simultaneous `effectSmokeBig` instances per fire; with
+   `maxActive = 3` fires that is 15 effects worst case — verify the frame
+   cost on the group's servers before raising the caps.
 4. **Infantry spawn on rooftop meshes (SWAT)** — if it fails, move the LZ to
    street level.
 5. **Cargo types accepting a custom `mass`** — the types in

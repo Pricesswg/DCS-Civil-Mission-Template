@@ -50,8 +50,9 @@ CIV.Config = {
   zones = {
     fireRegion        = "CIVIL Fire Region",         -- firefighting macro-region (spotter + C-130 line drops)
     firePoints        = "CIVIL Fire Point",           -- curated fire ignition points
+    fireStations      = "CIVIL Fire Station",         -- fire brigade depots (trucks depart from the nearest)
     waterPoints       = "CIVIL Water Point",          -- helicopter water pickup points (on water)
-    c130Reload        = "CIVIL C130 Reload",          -- ground retardant reload zone
+    c130Reload        = "CIVIL C130 Reload",          -- ground retardant reload zone (user-built static area)
     sarMountainRegion = "CIVIL SAR Mountain Region",
     sarMountainPoints = "CIVIL SAR Mountain Point",
     sarSeaRegion      = "CIVIL SAR Sea Region",
@@ -79,6 +80,7 @@ CIV.Config = {
     vessel   = "CIVIL Vessel",     -- ship group: spawned rescue boat
     swatTeam = "CIVIL SWAT Team",  -- ground group: SWAT squad (unit count from template scaled at spawn)
     fugitive = "CIVIL Fugitive",   -- vehicle group: police chase car
+    fireTruck= "CIVIL Fire Truck", -- vehicle group: fire brigade truck
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -86,6 +88,15 @@ CIV.Config = {
     rescueBoat = "speedboat",      -- stock small boat, TO VALIDATE type name
     swat       = "Soldier M4",
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
+    fireTruck  = "HEMTT TFFT",     -- stock airfield fire truck, TO VALIDATE
+  },
+
+  -- Automatic scenery dressing of fixed zones. The C-130 reload and the
+  -- CASEVAC LZs are normally USER-BUILT static areas (you decorate them
+  -- yourself in the ME), so their auto-dressing is off by default.
+  autoDress = {
+    c130Reload = false,
+    hospitals  = true,
   },
 
   ------------------------------------------------------------------
@@ -176,11 +187,34 @@ CIV.Config = {
   fire = {
     maxActive        = 3,
     autoIgnite       = { min = 600, max = 1800 },  -- s between automatic ignitions
-    startIntensity   = 1.0,
-    growthPerHour    = { min = 0.1, max = 0.5 },   -- randomized ONCE per fire, not per tick
-    heloDropAmount   = 0.4,     -- intensity reduction per helicopter water drop
-    c130DropPerSec   = 0.12,    -- intensity reduction per second during the line drop
+
+    -- SEVERITY: every fire carries an integer-ish severity from 1 to 10.
+    -- A small fire spawns as a single smoke/fire effect; as severity grows
+    -- new sub-fires light up around the anchor point (visual spread), up to
+    -- maxEffects simultaneous effects (performance cap: effect size keeps
+    -- scaling past the cap). Suppression subtracts severity; 0 = out.
+    severity = {
+      initial    = { min = 1, max = 3 },      -- rolled once at ignition
+      max        = 10,
+      growEvery  = { min = 300, max = 900 },  -- s per +1 severity, randomized ONCE per fire
+      maxEffects = 5,                          -- simultaneous smoke/fire effects cap
+    },
+
+    heloDropSeverity = 2.0,     -- severity removed per helicopter water drop
+    c130DropPerSec   = 0.25,    -- severity removed per second during the line drop
     c130DropSeconds  = 10,      -- line drop duration
+
+    -- Fire brigade: when a fire ignites, trucks depart from the nearest
+    -- "CIVIL Fire Station" zone and drive to it ("On Road" with the same
+    -- stall watchdog used by the police chase). Once on scene they apply
+    -- continuous ground suppression, so fewer air passes are needed.
+    trucks = {
+      enabled        = true,
+      count          = 2,      -- trucks per fire
+      speed          = 14,     -- m/s route speed (~50 km/h)
+      suppressRadius = 250,    -- m from the fire to count as "on scene"
+      suppressPerMin = 0.6,    -- severity removed per minute while on scene
+    },
     c130DropAGL      = { min = 120, max = 300 },   -- valid AGL band (nominal 150-250 m)
     dropRadius       = 300,     -- m, max distance from a fire for a drop to count
     c130ReloadTime   = 120,     -- s stationary inside the reload zone after requesting
@@ -202,7 +236,7 @@ CIV.Config = {
       enabled = true,
       containerTypes = { "Barrel", "Drum", "Fuel" },  -- retardant drums, TO VALIDATE
       matchAnyObject = true,      -- accept any foreign object until types are validated
-      amountPerContainer = 0.5,   -- intensity reduction per container on target
+      severityPerContainer = 2.0, -- severity removed per container on target
       creditRadius = 8000,        -- m, nearest player airplane within this range gets the score
     },
     usePhysicalCargo = false,   -- true = spawn a mass Cargo object on water (EXPERIMENTAL, test in ME first)
@@ -1405,13 +1439,16 @@ end)
 -- STARTUP
 ----------------------------------------------------------------------
 
--- initial dressing of fixed areas (if the zones exist in the mission)
+-- initial dressing of fixed areas (only where auto-dressing is enabled:
+-- user-built static areas like the C-130 reload keep their own decoration)
 CIV.schedule(function()
-  if CIV.Zones.byName(CIV.Config.zones.c130Reload) then
+  if CIV.Config.autoDress.c130Reload and CIV.Zones.byName(CIV.Config.zones.c130Reload) then
     CIV.Dressing.spawn(CIV.Config.zones.c130Reload, "c130_loading_area")
   end
-  for _, pt in ipairs(CIV.Pool.load(CIV.Config.zones.hospitals)) do
-    CIV.Dressing.spawn(pt.name, "medical_camp")
+  if CIV.Config.autoDress.hospitals then
+    for _, pt in ipairs(CIV.Pool.load(CIV.Config.zones.hospitals)) do
+      CIV.Dressing.spawn(pt.name, "medical_camp")
+    end
   end
 end, nil, 5)
 
@@ -1432,7 +1469,7 @@ end, nil, 4)
 -- preload pools so dcs.log immediately shows what is defined in ME
 CIV.schedule(function()
   local z = CIV.Config.zones
-  for _, prefix in pairs({ z.firePoints, z.waterPoints, z.sarMountainPoints,
+  for _, prefix in pairs({ z.firePoints, z.fireStations, z.waterPoints, z.sarMountainPoints,
       z.sarSeaPoints, z.policePoints, z.swatPoints, z.cargoPoints,
       z.medevacPoints, z.casevacPoints, z.hospitals, z.vesselSpawn }) do
     CIV.Pool.load(prefix)

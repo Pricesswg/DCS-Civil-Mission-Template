@@ -28,16 +28,28 @@ local C = CIV.Config
 local CF = C.fire
 
 ----------------------------------------------------------------------
--- FIRE ZONE MANAGER
+-- FIRE ZONE MANAGER (severity model)
+-- Every fire carries a severity from 1 to 10, rolled at ignition and
+-- growing on a per-fire randomized cadence. Visuals scale with severity:
+-- a small fire is a single smoke/fire effect; as it grows, sub-fires
+-- light up around the anchor (capped at severity.maxEffects simultaneous
+-- effects for performance; effect SIZE keeps scaling past the cap).
+-- Suppression (helicopter drops, C-130 line/airdrop, fire trucks on
+-- scene) subtracts severity; at 0 the fire is out.
 ----------------------------------------------------------------------
 
 CIV.Fire = { _fires = {}, _fid = 0 }
 local Fire = CIV.Fire
+local SEV = CF.severity
+local dispatchFireTrucks, releaseFireTrucks   -- defined in the brigade section
 
--- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL, 5..8 = smoke only
-local function presetFor(intensity)
-  if intensity >= 1.5 then return 4 elseif intensity >= 1.0 then return 3
-  elseif intensity >= 0.5 then return 2 else return 1 end
+-- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL
+local function presetFor(severity)
+  return math.max(1, math.min(4, math.ceil(severity / 2.5)))
+end
+
+local function effectCountFor(severity)
+  return math.max(1, math.min(SEV.maxEffects, math.ceil(severity / 2)))
 end
 
 function Fire.count()
@@ -48,24 +60,58 @@ end
 
 function Fire.actives() return Fire._fires end
 
+function Fire.severityLabel(fire)
+  return string.format("severity %d/10", math.ceil(fire.severity))
+end
+
+-- Bring the smoke/fire effect cluster in line with the current severity:
+-- add sub-fires as it grows, stop them as it shrinks, resize on preset
+-- change. Each effect keeps a stable random offset inside the fire zone.
+local function refreshVisuals(fire)
+  local wanted = effectCountFor(fire.severity)
+  local preset = presetFor(fire.severity)
+  for i = #fire.effects + 1, wanted do
+    local p = fire.point
+    if i > 1 then
+      p = CIV.offsetPoint(fire.point, math.random(0, 359),
+        math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
+    end
+    fire.effects[i] = { point = p, name = fire.smokeName .. "_" .. i, preset = 0 }
+  end
+  for i = #fire.effects, wanted + 1, -1 do
+    trigger.action.effectSmokeStop(fire.effects[i].name)
+    fire.effects[i] = nil
+  end
+  for _, eff in ipairs(fire.effects) do
+    if eff.preset ~= preset then
+      if eff.preset ~= 0 then trigger.action.effectSmokeStop(eff.name) end
+      eff.preset = preset
+      trigger.action.effectSmokeBig(eff.point, preset, 0.7, eff.name)
+    end
+  end
+end
+
 function Fire.ignite(pt)
   Fire._fid = Fire._fid + 1
   local fire = {
     id = Fire._fid, pt = pt,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
-    intensity = CF.startIntensity,
-    growth = CIV.randBetween(CF.growthPerHour) / 3600,  -- fixed for the fire's lifetime
+    severity = math.random(SEV.initial.min, SEV.initial.max),
+    growEvery = CIV.randBetween(SEV.growEvery),   -- fixed for the fire's lifetime
     smokeName = "CIVIL_FIRE_" .. Fire._fid,
-    preset = 0, markId = nil,
+    effects = {}, markId = nil,
   }
-  fire.preset = presetFor(fire.intensity)
-  trigger.action.effectSmokeBig(fire.point, fire.preset, 0.7, fire.smokeName)
+  fire.nextGrow = timer.getTime() + fire.growEvery
+  refreshVisuals(fire)
   Fire._fires[fire.id] = fire
   CIV.Pool.occupy(pt)
   fire.zoneMarkId = CIV.drawEventZone(pt.area, "WILDFIRE " .. pt.name, "fire")
-  CIV.msgAll("WILDFIRE reported at " .. pt.name .. "\n" .. CIV.coordText(fire.point) ..
+  CIV.msgAll("WILDFIRE reported at " .. pt.name .. " (" .. Fire.severityLabel(fire) ..
+    ")\n" .. CIV.coordText(fire.point) ..
     "\nFire zone highlighted on the F10 map.", 20)
-  CIV.log("Fire #" .. fire.id .. " ignited at " .. pt.name)
+  CIV.log("Fire #" .. fire.id .. " ignited at " .. pt.name ..
+    " severity " .. fire.severity)
+  dispatchFireTrucks(fire)
   return fire
 end
 
@@ -77,34 +123,29 @@ function Fire.igniteRandom()
 end
 
 local function extinguish(fire, byWhom)
-  trigger.action.effectSmokeStop(fire.smokeName)
+  for _, eff in ipairs(fire.effects) do
+    trigger.action.effectSmokeStop(eff.name)
+  end
+  fire.effects = {}
   CIV.unmark(fire.markId)
   CIV.unmark(fire.zoneMarkId)
   CIV.Pool.release(fire.pt)
   Fire._fires[fire.id] = nil
+  releaseFireTrucks(fire)
   CIV.msgAll("Fire at " .. fire.pt.name .. " EXTINGUISHED" ..
     (byWhom and (" by " .. byWhom) or "") .. ".", 15)
 end
 
-local function refreshEffect(fire)
-  local p = presetFor(fire.intensity)
-  if p ~= fire.preset then
-    fire.preset = p
-    trigger.action.effectSmokeStop(fire.smokeName)
-    trigger.action.effectSmokeBig(fire.point, p, 0.7, fire.smokeName)
-  end
-end
-
--- Apply water/retardant at a point. Returns the fire hit (or nil).
--- Score attribution is the caller's job.
+-- Apply suppression at a point (amount in severity units). Returns the
+-- fire hit (or nil). Score attribution is the caller's job.
 function Fire.applyWater(point, amount, byWhom)
   for _, fire in pairs(Fire._fires) do
     if CIV.dist2D(point, fire.point) <= CF.dropRadius then
-      fire.intensity = fire.intensity - amount
-      if fire.intensity <= 0 then
+      fire.severity = fire.severity - amount
+      if fire.severity <= 0 then
         extinguish(fire, byWhom)
       else
-        refreshEffect(fire)
+        refreshVisuals(fire)
       end
       return fire
     end
@@ -115,16 +156,119 @@ end
 -- growth + automatic ignition loop
 local nextIgnition = timer.getTime() + CIV.randBetween(CF.autoIgnite)
 CIV.schedule(function(_, t)
+  local now = timer.getTime()
   for _, fire in pairs(Fire._fires) do
-    fire.intensity = math.min(2.0, fire.intensity + fire.growth * 10)
-    refreshEffect(fire)
+    if now >= fire.nextGrow and fire.severity < SEV.max then
+      fire.severity = math.min(SEV.max, fire.severity + 1)
+      fire.nextGrow = now + fire.growEvery
+      refreshVisuals(fire)
+      if fire.severity >= SEV.max then
+        CIV.msgAll("Fire at " .. fire.pt.name ..
+          " is RAGING (severity 10/10): all assets required.", 15)
+      end
+    end
   end
-  if timer.getTime() >= nextIgnition then
+  if now >= nextIgnition then
     Fire.igniteRandom()
-    nextIgnition = timer.getTime() + CIV.randBetween(CF.autoIgnite)
+    nextIgnition = now + CIV.randBetween(CF.autoIgnite)
   end
   return t + 10
 end, nil, 15)
+
+----------------------------------------------------------------------
+-- FIRE BRIGADE (scenic ground response)
+-- Trucks depart from the nearest "CIVIL Fire Station" zone and drive to
+-- the fire "On Road" (same stall watchdog as the police chase). On scene
+-- they apply continuous suppression, cutting the air passes needed.
+----------------------------------------------------------------------
+
+local function truckRoute(brigade, fromPoint, firePoint)
+  local g = Group.getByName(brigade.gname)
+  if not g then return end
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = fromPoint.x, y = fromPoint.z, type = "Turning Point",
+        action = brigade.roadAction, speed = CF.trucks.speed },
+      { x = firePoint.x, y = firePoint.z, type = "Turning Point",
+        action = brigade.roadAction, speed = CF.trucks.speed },
+    } } } })
+  end)
+end
+
+dispatchFireTrucks = function(fire)
+  if not CF.trucks.enabled then return end
+  local best, bestDist = nil, 1e12
+  for _, pt in ipairs(CIV.Pool.load(C.zones.fireStations)) do
+    local d = CIV.dist2D(pt.point, fire.point)
+    if d < bestDist then best, bestDist = pt, d end
+  end
+  if not best then return end
+  local gname = CIV.spawnGround(best.point, CF.trucks.count,
+    C.templates.fireTruck, C.fallbackTypes.fireTruck, "CIVIL_FIRETRUCK")
+  fire.brigade = {
+    gname = gname, station = best, arrived = false,
+    roadAction = "On Road", lastPos = nil, stalledSince = nil, rekicks = 0,
+  }
+  CIV.schedule(function() truckRoute(fire.brigade, best.point, fire.point) end, nil, 2)
+  CIV.msgAll("Fire brigade rolling out of " .. best.name .. " towards " ..
+    fire.pt.name .. ".", 12)
+end
+
+releaseFireTrucks = function(fire)
+  if not fire.brigade then return end
+  local gname = fire.brigade.gname
+  fire.brigade = nil
+  -- scenic pause on scene, then the trucks are cleared
+  CIV.schedule(function() CIV.despawnGroup(gname) end, nil, 120)
+end
+
+-- brigade loop: arrival detection, ground suppression, stall watchdog
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, fire in pairs(Fire._fires) do
+    local b = fire.brigade
+    if b then
+      local g = Group.getByName(b.gname)
+      local u = g and g:getUnit(1)
+      if not u or not u:isExist() then
+        fire.brigade = nil
+      else
+        local p = u:getPoint()
+        if not b.arrived then
+          if CIV.dist2D(p, fire.point) <= CF.trucks.suppressRadius then
+            b.arrived = true
+            CIV.msgAll("Fire brigade ON SCENE at " .. fire.pt.name ..
+              ": ground suppression in progress.", 12)
+          else
+            -- stall watchdog (known "On Road" bug, same pattern as the chase)
+            if b.lastPos and CIV.dist2D(p, b.lastPos) < 5 then
+              b.stalledSince = b.stalledSince or now
+              if now - b.stalledSince > 60 then
+                b.stalledSince = nil
+                b.rekicks = b.rekicks + 1
+                if b.rekicks >= 2 then b.roadAction = "Off Road" end
+                truckRoute(b, p, fire.point)
+                CIV.dbg("Fire brigade re-kicked towards " .. fire.pt.name)
+              end
+            else
+              b.stalledSince = nil
+            end
+            b.lastPos = { x = p.x, y = p.y, z = p.z }
+          end
+        else
+          -- 10 s tick: suppressPerMin / 6 severity per tick
+          fire.severity = fire.severity - CF.trucks.suppressPerMin / 6
+          if fire.severity <= 0 then
+            extinguish(fire, "the fire brigade")
+          else
+            refreshVisuals(fire)
+          end
+        end
+      end
+    end
+  end
+  return t + 10
+end, nil, 20)
 
 ----------------------------------------------------------------------
 -- HELICOPTER WATER OPS
@@ -192,7 +336,7 @@ local function dropWater(uname)
     return
   end
   local info = CIV.players[uname]
-  local fire = Fire.applyWater(u:getPoint(), CF.heloDropAmount, info and info.playerName)
+  local fire = Fire.applyWater(u:getPoint(), CF.heloDropSeverity, info and info.playerName)
   st.water = false
   if fire then
     CIV.msgUnit(u, "Drop on target!", 10)
@@ -223,7 +367,7 @@ CIV.schedule(function(_, t)
             CIV.despawnStatic(st.cargoName)
             st.cargoName = nil
             local info = CIV.players[uname]
-            Fire.applyWater(fire.point, CF.heloDropAmount, info and info.playerName)
+            Fire.applyWater(fire.point, CF.heloDropSeverity, info and info.playerName)
             if info then
               CIV.Score.award(info.playerName, "fireHelo", 1.0, 0.5, 1, "firefighting drop")
             end
@@ -371,7 +515,7 @@ if CF.airdrop.enabled then
 
   local function retardantOnTarget(impact)
     local playerInfo = CIV.nearestPlayerAirplane(impact, CF.airdrop.creditRadius)
-    local fire = Fire.applyWater(impact, CF.airdrop.amountPerContainer,
+    local fire = Fire.applyWater(impact, CF.airdrop.severityPerContainer,
       playerInfo and playerInfo.playerName)
     if fire and playerInfo then
       CIV.Score.award(playerInfo.playerName, "fireC130",
@@ -430,8 +574,8 @@ CIV.schedule(function(_, t)
     local n, txt = 0, ""
     for _, fire in pairs(Fire.actives()) do
       n = n + 1
-      txt = txt .. string.format("- %s: %s (intensity %d%%)\n", fire.pt.name,
-        CIV.llString(fire.point), math.floor(fire.intensity * 100))
+      txt = txt .. string.format("- %s: %s (%s)\n", fire.pt.name,
+        CIV.llString(fire.point), Fire.severityLabel(fire))
       if not fire.markId then
         fire.markId = CIV.mark("WILDFIRE " .. fire.pt.name, fire.point)
       end
@@ -456,8 +600,11 @@ CIV.Menu_register(function(gid, uname)
     local n, txt = 0, "Active fires:\n"
     for _, fire in pairs(Fire.actives()) do
       n = n + 1
-      txt = txt .. string.format("- %s  intensity %d%%  %s\n", fire.pt.name,
-        math.floor(fire.intensity * 100), CIV.llString(fire.point))
+      local brigade = fire.brigade
+        and (fire.brigade.arrived and "  [brigade on scene]" or "  [brigade en route]")
+        or ""
+      txt = txt .. string.format("- %s  %s  %s%s\n", fire.pt.name,
+        Fire.severityLabel(fire), CIV.llString(fire.point), brigade)
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active fires.", 20)
   end)
