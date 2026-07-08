@@ -86,6 +86,9 @@ used when absent):**
 | `CIVIL SWAT Team ...` | SWAT squad | `Soldier M4` |
 | `CIVIL Fugitive ...` | police chase car | `LandRover_ah` |
 | `CIVIL Fire Truck ...` | fire brigade truck | `HEMTT TFFT` |
+| `CIVIL Scene Rescue ...` | MedEvac scene: ambulance + medics | none (scene skipped) |
+| `CIVIL Scene Accident ...` | MedEvac scene: crashed cars, bystanders | none (scene skipped) |
+| `CIVIL Scene Battlefield ...` | CASEVAC scene: battlefield props | none (scene skipped) |
 
 **Variety through multiple templates**: place as many groups as you want
 with the same prefix and each spawn picks ONE of them at random. For
@@ -93,6 +96,15 @@ example `CIVIL Boat 1`, `CIVIL Boat 2`, `CIVIL Boat 3` (or `CIVIL Fugitive
 BMW`, `CIVIL Fugitive Van`: any suffix works, numbering is optional) and
 every event comes out with a different boat or car. The list builds itself
 at mission start, no config to touch.
+
+**Rescue scenes**: MedEvac and CASEVAC events also spawn a scene next to
+the casualty. The scenario first picks a scene TYPE at random from its list
+(`rescue.scenes.byScenario`: plain rescue with an ambulance, or a car
+accident), then a random variant among the templates sharing that prefix.
+Build each scene as one ground group in the ME (an ambulance vehicle plus
+two medics, wrecked cars, and so on). When the event ends the scene stays
+on for `rescue.scenes.despawnDelay` (default 5 minutes), then it is
+cleared. Scenarios without templates simply spawn no scene.
 
 ## The severity scale (1-10, all events)
 

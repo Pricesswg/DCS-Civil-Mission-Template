@@ -78,6 +78,23 @@ For variety, place SEVERAL templates with the same prefix (`CIVIL Boat 1`,
 one of the matching templates at random. Useful to rotate boat types, car
 types, uniforms and so on without touching the config.
 
+**Rescue scenes** (optional): MedEvac and CASEVAC also dress the casualty
+site with a scene group. Scene type is picked at random from the
+scenario's list in `rescue.scenes.byScenario`, then a random variant among
+the matching templates:
+
+| Group prefix | Scenario | Suggested content |
+|---|---|---|
+| `CIVIL Scene Rescue ...` | MedEvac | ambulance vehicle + 2 medics |
+| `CIVIL Scene Accident ...` | MedEvac | crashed cars, bystanders |
+| `CIVIL Scene Battlefield ...` | CASEVAC | battlefield props, soldiers |
+
+Each scene is ONE ground group (DCS ground groups can mix vehicles and
+infantry). It spawns ~15 m from the casualty so the hover center stays
+clean, and it is cleared `rescue.scenes.despawnDelay` seconds (default 300,
+5 minutes) after the event ends. No template with that prefix = no scene,
+the event runs anyway.
+
 | Group prefix | Use | Fallback if absent |
 |---|---|---|
 | `CIVIL Survivor ...` | mountain SAR missing person / MedEvac casualty (ground) | `Soldier M4` |

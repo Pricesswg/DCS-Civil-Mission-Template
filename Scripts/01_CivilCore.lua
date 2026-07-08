@@ -291,6 +291,23 @@ CIV.Config = {
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
 
+    -- Scene dressing spawned NEXT TO the casualty: each scenario picks one
+    -- entry at random from its list, then clones a late-activated template
+    -- with that prefix (several templates sharing the prefix = variants,
+    -- picked at random like every other template). A scene is one ground
+    -- group built in the ME: e.g. an ambulance plus two medics for the
+    -- plain rescue, wrecked cars and bystanders for the accident. Missing
+    -- templates are skipped silently, so scenes are fully optional.
+    scenes = {
+      despawnDelay = 300,   -- s the scene stays after the event ends (pickup, fail or cancel)
+      offsetM = 15,         -- m from the casualty (keeps the hover center clean)
+      byScenario = {
+        MEDEVAC = { "CIVIL Scene Rescue", "CIVIL Scene Accident" },
+        CASEVAC = { "CIVIL Scene Battlefield" },
+        -- SAR_MOUNTAIN / SAR_SEA: no scene by default (add lists here to enable)
+      },
+    },
+
     -- AI SAR vessels: ship groups placed in the ME whose GROUP name starts
     -- with groupPrefix are tasked toward the APPROXIMATE search area when a
     -- sea SAR event starts (consistent with the intel model: they do not

@@ -195,11 +195,40 @@ local function releaseVessels(evt)
   evt.spawnedVessels = nil
 end
 
+-- Scene dressing next to the casualty (ambulance and medics, wrecked
+-- cars, battlefield props: whatever the matching ME template contains).
+-- One random entry from the scenario's list, then one random template
+-- among those sharing that prefix.
+local function spawnScene(def, evt)
+  local sceneList = C.rescue.scenes.byScenario[def.key]
+  if not sceneList or #sceneList == 0 then return end
+  local prefix = sceneList[math.random(#sceneList)]
+  local scenePoint = CIV.offsetPoint(evt.point, math.random(0, 359),
+    C.rescue.scenes.offsetM)
+  local gname = CIV.spawnFromTemplate(prefix, scenePoint)
+  if gname then
+    evt.sceneGname = gname
+    CIV.dbg("Scene '" .. prefix .. "' spawned for " .. def.key .. " #" .. evt.id)
+  else
+    CIV.dbg("No scene template found for prefix '" .. prefix .. "'")
+  end
+end
+
+-- The scene lingers for a while after the event ends, then it is cleared
+local function releaseScene(evt)
+  if not evt.sceneGname then return end
+  local gname = evt.sceneGname
+  evt.sceneGname = nil
+  CIV.schedule(function() CIV.despawnGroup(gname) end,
+    nil, C.rescue.scenes.despawnDelay)
+end
+
 local function closeEvent(sc, evt)
   sc.events[evt.id] = nil
   CIV.Pool.release(evt.pt)
   stopBeacon(evt)
   releaseVessels(evt)
+  releaseScene(evt)
   CIV.unmark(evt.markId)
   CIV.unmark(evt.circleId)
   if evt.gname then CIV.despawnGroup(evt.gname) end
@@ -285,6 +314,7 @@ function R.startEvent(key, opts)
       C.fallbackTypes.survivor, "CIVIL_" .. def.key)
   end
   startBeacon(def, evt)
+  spawnScene(def, evt)
   sc.events[evt.id] = evt
   CIV.Pool.occupy(pt)
 
@@ -326,11 +356,13 @@ function R.startEvent(key, opts)
     radius = hp.radius, minAGL = hp.minAGL, maxAGL = hp.maxAGL,
     maxSpeed = hp.maxSpeed, T = requiredT, window = windowS, B = hp.B,
     onSuccess = function(unit, session)
-      -- despawn = loaded aboard; delivery just consumes the state flag
+      -- despawn = loaded aboard; delivery just consumes the state flag.
+      -- The scene assets stay a few more minutes, then they pack up.
       CIV.despawnGroup(evt.gname)
       evt.gname = nil
       stopBeacon(evt)
       releaseVessels(evt)
+      releaseScene(evt)
       table.insert(R.aboardList(unit:getName()), {
         scoreType = def.scoreType, label = def.label, evt = evt,
         quality = def.qualityFn and def.qualityFn(evt, session)
