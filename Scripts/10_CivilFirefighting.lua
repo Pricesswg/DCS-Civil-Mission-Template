@@ -43,9 +43,12 @@ local Fire = CIV.Fire
 local SEV = CF.severity
 local dispatchFireTrucks, releaseFireTrucks   -- defined in the brigade section
 
--- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL
-local function presetFor(severity)
-  return math.max(1, math.min(4, math.ceil(severity / 2.5)))
+-- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL, 5..8 = thick smoke
+-- only (used by smokeOnly fire kinds such as a landfill fire)
+local function presetFor(severity, kindDef)
+  local preset = math.max(1, math.min(4, math.ceil(severity / 2.5)))
+  if kindDef and kindDef.smokeOnly then preset = preset + 4 end
+  return preset
 end
 
 local function effectCountFor(severity)
@@ -69,7 +72,7 @@ end
 -- change. Each effect keeps a stable random offset inside the fire zone.
 local function refreshVisuals(fire)
   local wanted = effectCountFor(fire.severity)
-  local preset = presetFor(fire.severity)
+  local preset = presetFor(fire.severity, fire.kindDef)
   for i = #fire.effects + 1, wanted do
     local p = fire.point
     if i > 1 then
@@ -93,13 +96,16 @@ end
 
 function Fire.ignite(pt, severityOverride)
   Fire._fid = Fire._fid + 1
+  -- kind picked by weight: forest (fire), landfill (dark smoke, slow),
+  -- industrial (fast growth); tells the players from afar what is burning
+  local kindDef = CIV.weightedPick(CF.kinds)
   local fire = {
-    id = Fire._fid, pt = pt,
+    id = Fire._fid, pt = pt, kindDef = kindDef,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
     severity = severityOverride
       and math.max(1, math.min(SEV.max, severityOverride))
       or math.random(SEV.initial.min, SEV.initial.max),
-    growEvery = CIV.randBetween(SEV.growEvery),   -- fixed for the fire's lifetime
+    growEvery = CIV.randBetween(SEV.growEvery) / kindDef.growMult,
     smokeName = "CIVIL_FIRE_" .. Fire._fid,
     effects = {}, markId = nil,
   }
@@ -107,12 +113,13 @@ function Fire.ignite(pt, severityOverride)
   refreshVisuals(fire)
   Fire._fires[fire.id] = fire
   CIV.Pool.occupy(pt)
-  fire.zoneMarkId = CIV.drawEventZone(pt.area, "WILDFIRE " .. pt.name, "fire")
-  CIV.msgAll("WILDFIRE reported at " .. pt.name .. " (" .. Fire.severityLabel(fire) ..
-    ")\n" .. CIV.coordText(fire.point) ..
+  fire.zoneMarkId = CIV.drawEventZone(pt.area,
+    string.upper(kindDef.name) .. " " .. pt.name, "fire")
+  CIV.msgAll(string.upper(kindDef.name) .. " reported at " .. pt.name ..
+    " (" .. Fire.severityLabel(fire) .. ")\n" .. CIV.coordText(fire.point) ..
     "\nFire zone highlighted on the F10 map.", 20)
-  CIV.log("Fire #" .. fire.id .. " ignited at " .. pt.name ..
-    " severity " .. fire.severity)
+  CIV.log("Fire #" .. fire.id .. " (" .. kindDef.name .. ") ignited at " ..
+    pt.name .. " severity " .. fire.severity)
   dispatchFireTrucks(fire)
   return fire
 end
@@ -605,7 +612,8 @@ CIV.schedule(function(_, t)
       txt = txt .. string.format("- %s: %s (%s)\n", fire.pt.name,
         CIV.llString(fire.point), Fire.severityLabel(fire))
       if not fire.markId then
-        fire.markId = CIV.mark("WILDFIRE " .. fire.pt.name, fire.point)
+        fire.markId = CIV.mark(string.upper(fire.kindDef.name) .. " " ..
+          fire.pt.name, fire.point)
       end
     end
     if n > 0 then

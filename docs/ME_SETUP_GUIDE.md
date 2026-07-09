@@ -88,6 +88,16 @@ the matching templates:
 | `CIVIL Scene Rescue ...` | MedEvac | ambulance vehicle + 2 medics |
 | `CIVIL Scene Accident ...` | MedEvac | crashed cars, bystanders |
 | `CIVIL Scene Battlefield ...` | CASEVAC | battlefield props, soldiers |
+| `CIVIL Scene Camp ...` | SAR mountain | tent, backpacks, a second hiker |
+| `CIVIL Scene Crash ...` | SAR mountain | light aircraft wreck |
+| `CIVIL Scene Sea ...` | SAR sea | capsized boat, debris (SHIP group) |
+| `CIVIL Scene Robbery ...` | chase start | police cars, crowd at the bank |
+| `CIVIL Scene Standoff ...` | SWAT objective | police cordon, parked cars |
+
+The subject signal command works day and night: orange smoke by day, green
+signal flares after dark (`rescue.signal` sets the night hours and the
+flare count). Fires also roll a KIND at ignition (`fire.kinds`): forest,
+landfill (thick smoke, slow) or industrial (fast), named in every report.
 
 Each scene is ONE ground group (DCS ground groups can mix vehicles and
 infantry). It spawns ~15 m from the casualty so the hover center stays

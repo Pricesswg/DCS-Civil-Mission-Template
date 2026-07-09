@@ -491,10 +491,12 @@ CIV.schedule(function(_, t)
 end, nil, 20)
 
 ----------------------------------------------------------------------
--- SURVIVOR SMOKE (CSAR-style visual mark on request)
+-- SUBJECT SIGNAL ON REQUEST (all rescue variants share it)
+-- Orange smoke by day; by night smoke is invisible, so the subject fires
+-- a sequence of signal flares instead. CSAR-style visual mark.
 ----------------------------------------------------------------------
 
-local function popSmoke(uname)
+local function requestSignal(uname)
   local u = Unit.getByName(uname)
   if not u or not u:isExist() then return end
   local p = u:getPoint()
@@ -509,11 +511,26 @@ local function popSmoke(uname)
     CIV.msgUnit(u, "No rescue subject within 15 km.", 10)
     return
   end
-  local sp = CIV.offsetPoint(best.point, math.random(0, 359), C.rescue.smokeOffsetM)
-  trigger.action.smoke(sp, trigger.smokeColor.Orange)
-  CIV.msgUnit(u, "Subject is marking position with ORANGE smoke. " ..
-    "Confirm visual before pickup.", 12)
+  if CIV.isNight() then
+    local sig = C.rescue.signal
+    for i = 0, sig.flareCount - 1 do
+      CIV.schedule(function()
+        local fp = CIV.offsetPoint(best.point, math.random(0, 359), 5)
+        pcall(trigger.action.signalFlare, fp,
+          trigger.flareColor and trigger.flareColor.Green or 0,
+          math.random(0, 359))
+      end, nil, 1 + i * sig.flareIntervalSeconds)
+    end
+    CIV.msgUnit(u, "Subject is firing GREEN signal flares (" ..
+      sig.flareCount .. " shots). Watch for them before pickup.", 12)
+  else
+    local sp = CIV.offsetPoint(best.point, math.random(0, 359), C.rescue.smokeOffsetM)
+    trigger.action.smoke(sp, trigger.smokeColor.Orange)
+    CIV.msgUnit(u, "Subject is marking position with ORANGE smoke. " ..
+      "Confirm visual before pickup.", 12)
+  end
 end
+R.requestSignal = requestSignal
 
 ----------------------------------------------------------------------
 -- SPOTTER IDENTIFICATION
@@ -668,7 +685,8 @@ R.newScenario({
 
 CIV.Menu_register(function(gid, uname)
   local sub = missionCommands.addSubMenuForGroup(gid, "Rescue", CIV.rootMenu[gid])
-  missionCommands.addCommandForGroup(gid, "Request smoke from subject", sub, popSmoke, uname)
+  missionCommands.addCommandForGroup(gid,
+    "Request signal from subject (smoke / night flares)", sub, requestSignal, uname)
   missionCommands.addCommandForGroup(gid, "Active rescue events", sub, function()
     local n, txt = 0, "Active rescue events:\n"
     for _, sc in pairs(R._scenarios) do

@@ -213,6 +213,15 @@ CIV.Config = {
     c130DropPerSec   = 0.25,    -- severity removed per second during the line drop
     c130DropSeconds  = 10,      -- line drop duration
 
+    -- Fire kinds, picked by weight at ignition. smokeOnly kinds use the
+    -- thick-smoke effect presets (a dump burns dark and slow), growMult
+    -- speeds up or slows down the severity growth cadence.
+    kinds = {
+      { name = "forest fire",     weight = 60, smokeOnly = false, growMult = 1.0 },
+      { name = "landfill fire",   weight = 20, smokeOnly = true,  growMult = 0.6 },
+      { name = "industrial fire", weight = 20, smokeOnly = false, growMult = 1.5 },
+    },
+
     -- Fire brigade: when a fire ignites, trucks depart from the nearest
     -- "CIVIL Fire Station" zone and drive to it ("On Road" with the same
     -- stall watchdog used by the police chase). Once on scene they apply
@@ -291,6 +300,16 @@ CIV.Config = {
     delivery = { radius = 40, maxSpeed = 2.0, maxAGL = 10, holdSeconds = 15 }, -- zone-based hospital delivery
     smokeOffsetM = 20,     -- survivor smoke is offset by this distance
 
+    -- Subject signal on request (all rescue variants share it): orange
+    -- smoke by day, a sequence of signal flares by night, because smoke is
+    -- invisible in the dark. Night is decided from mission local time.
+    signal = {
+      flareCount = 3,
+      flareIntervalSeconds = 3,
+      nightStartHour = 19,
+      nightEndHour = 6,
+    },
+
     -- Scene dressing spawned NEXT TO the casualty: each scenario picks one
     -- entry at random from its list, then clones a late-activated template
     -- with that prefix (several templates sharing the prefix = variants,
@@ -302,9 +321,10 @@ CIV.Config = {
       despawnDelay = 300,   -- s the scene stays after the event ends (pickup, fail or cancel)
       offsetM = 15,         -- m from the casualty (keeps the hover center clean)
       byScenario = {
-        MEDEVAC = { "CIVIL Scene Rescue", "CIVIL Scene Accident" },
-        CASEVAC = { "CIVIL Scene Battlefield" },
-        -- SAR_MOUNTAIN / SAR_SEA: no scene by default (add lists here to enable)
+        MEDEVAC      = { "CIVIL Scene Rescue", "CIVIL Scene Accident" },
+        CASEVAC      = { "CIVIL Scene Battlefield" },
+        SAR_MOUNTAIN = { "CIVIL Scene Camp", "CIVIL Scene Crash" },
+        SAR_SEA      = { "CIVIL Scene Sea" },   -- build it as a SHIP group (it spawns on water)
       },
     },
 
@@ -383,6 +403,7 @@ CIV.Config = {
     convoySeverity = 8,     -- severity >= this spawns a two-vehicle convoy
     routeHops      = 3,     -- waypoints generated ahead (local random walk)
     neighborRadius = 1500,  -- m, "nearby points" for the random walk
+    sceneTemplates = { "CIVIL Scene Robbery" },  -- scene at the chase start crossroad (optional)
   },
   swat = {
     severity      = { min = 1, max = 10 },  -- scenario escalation, one roll per scenario
@@ -390,6 +411,7 @@ CIV.Config = {
     boardingTime  = 20,     -- s stationary at the base to board the team
     resolveTime   = 300,    -- s baseline for the squad to "resolve" the scenario (scaled by severity)
     resolveFactor = { atMin = 0.7, atMax = 1.5 },
+    sceneTemplates = { "CIVIL Scene Standoff" }, -- scene at the objective (optional)
   },
 
   ------------------------------------------------------------------
@@ -557,6 +579,25 @@ end
 function CIV.severityMult(sev)
   local s = CIV.Config.score.severity
   return s.base + s.perPoint * math.max(1, math.min(10, sev))
+end
+
+-- weighted random pick from a list of { weight = n, ... } entries
+function CIV.weightedPick(list)
+  local total = 0
+  for _, entry in ipairs(list) do total = total + entry.weight end
+  local r, acc = math.random(total), 0
+  for _, entry in ipairs(list) do
+    acc = acc + entry.weight
+    if r <= acc then return entry end
+  end
+  return list[1]
+end
+
+-- night check from mission local time (hours configured in rescue.signal)
+function CIV.isNight()
+  local s = CIV.Config.rescue.signal
+  local h = (timer.getAbsTime() % 86400) / 3600
+  return h >= s.nightStartHour or h < s.nightEndHour
 end
 
 -- Self-contained atan2 (avoids DCS Lua build differences), from the 527th CSAR

@@ -89,6 +89,11 @@ used when absent):**
 | `CIVIL Scene Rescue ...` | MedEvac scene: ambulance + medics | none (scene skipped) |
 | `CIVIL Scene Accident ...` | MedEvac scene: crashed cars, bystanders | none (scene skipped) |
 | `CIVIL Scene Battlefield ...` | CASEVAC scene: battlefield props | none (scene skipped) |
+| `CIVIL Scene Camp ...` | mountain SAR scene: tent, second hiker | none (scene skipped) |
+| `CIVIL Scene Crash ...` | mountain SAR scene: aircraft wreck | none (scene skipped) |
+| `CIVIL Scene Sea ...` | sea SAR scene, built as a SHIP group | none (scene skipped) |
+| `CIVIL Scene Robbery ...` | chase start scene: police cars, crowd | none (scene skipped) |
+| `CIVIL Scene Standoff ...` | SWAT objective scene: cordon, cars | none (scene skipped) |
 
 **Variety through multiple templates**: place as many groups as you want
 with the same prefix and each spawn picks ONE of them at random. For
@@ -97,14 +102,25 @@ BMW`, `CIVIL Fugitive Van`: any suffix works, numbering is optional) and
 every event comes out with a different boat or car. The list builds itself
 at mission start, no config to touch.
 
-**Rescue scenes**: MedEvac and CASEVAC events also spawn a scene next to
-the casualty. The scenario first picks a scene TYPE at random from its list
-(`rescue.scenes.byScenario`: plain rescue with an ambulance, or a car
-accident), then a random variant among the templates sharing that prefix.
-Build each scene as one ground group in the ME (an ambulance vehicle plus
-two medics, wrecked cars, and so on). When the event ends the scene stays
-on for `rescue.scenes.despawnDelay` (default 5 minutes), then it is
-cleared. Scenarios without templates simply spawn no scene.
+**Event scenes**: rescue events, the chase start and the SWAT objective all
+spawn a scene next to the action. The scenario first picks a scene TYPE at
+random from its list (`rescue.scenes.byScenario`, `police.sceneTemplates`,
+`swat.sceneTemplates`), then a random variant among the templates sharing
+that prefix. Build each scene as one group in the ME (an ambulance plus two
+medics, wrecked cars, a police cordon; the sea scene as a ship group). When
+the event ends the scene stays on for `rescue.scenes.despawnDelay` (default
+5 minutes), then it is cleared. Missing templates simply spawn no scene.
+
+**Subject signal, day and night**: the F10 command asks the subject to mark
+its position. By day it pops orange smoke; by night (mission local time,
+`rescue.signal` hours) smoke would be invisible, so the subject fires a
+sequence of green signal flares instead. Works the same for every rescue
+variant: mountain, sea, MedEvac and CASEVAC.
+
+**Fire kinds**: each ignition rolls what is burning (`fire.kinds`): a
+forest fire (flames), a landfill fire (thick dark smoke, slow growth) or an
+industrial fire (fast growth). The report and the F10 mark name the kind,
+so players can tell from afar what they are heading into.
 
 ## The severity scale (1-10, all events)
 

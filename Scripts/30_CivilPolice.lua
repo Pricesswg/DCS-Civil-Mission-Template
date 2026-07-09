@@ -32,6 +32,24 @@ local CS = C.swat
 CIV.Police = { _chases = {}, _cid = 0 }
 local PL = CIV.Police
 
+-- Optional scene dressing (robbery scene at the chase start, standoff at
+-- the SWAT objective): same template mechanics as the rescue scenes, same
+-- lingering despawn delay after the event ends.
+local function spawnPoliceScene(templates, point)
+  if not templates or #templates == 0 then return nil end
+  local prefix = templates[math.random(#templates)]
+  local sp = CIV.offsetPoint(point, math.random(0, 359), 20)
+  local gname = CIV.spawnFromTemplate(prefix, sp)
+  if not gname then CIV.dbg("No scene template for prefix '" .. prefix .. "'") end
+  return gname
+end
+
+local function releaseSceneLater(gname)
+  if not gname then return end
+  CIV.schedule(function() CIV.despawnGroup(gname) end,
+    nil, C.rescue.scenes.despawnDelay)
+end
+
 local function waypoint(pt, speed, action)
   return { x = pt.point.x, y = pt.point.z, type = "Turning Point",
            action = action or "On Road", speed = speed,
@@ -112,6 +130,7 @@ function PL.startChase(opts)
   }
   PL._chases[chase.id] = chase
   CIV.Pool.occupy(start)
+  chase.sceneGname = spawnPoliceScene(CP.sceneTemplates, start.point)
   chase.zoneMarkId = CIV.drawEventZone(start.area,
     "Police chase #" .. chase.id .. " last report", "chase")
   CIV.schedule(function() assignRoute(chase) end, nil, 2)
@@ -129,6 +148,8 @@ end
 local function closeChase(chase, despawnAfter)
   CIV.Pool.release(chase.startPt)
   CIV.unmark(chase.zoneMarkId)
+  releaseSceneLater(chase.sceneGname)
+  chase.sceneGname = nil
   PL._chases[chase.id] = nil
   local gname = chase.gname
   CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 60)
@@ -292,6 +313,7 @@ function SW.startScenario(opts)
       or CIV.rollSeverity(CS.severity) }
   SW._scenarios[scen.id] = scen
   CIV.Pool.occupy(pt)
+  scen.sceneGname = spawnPoliceScene(CS.sceneTemplates, pt.point)
   scen.circleId = CIV.drawEventZone(pt.area, "SWAT objective #" .. scen.id, "swat")
 
   local hp = C.hover.fastRope
@@ -322,6 +344,8 @@ function SW.startScenario(opts)
         CIV.msgAll("SWAT: scenario at " .. pt.name .. " RESOLVED. Area secure.", 15)
         CIV.unmark(scen.circleId)
         CIV.Pool.release(pt)
+        releaseSceneLater(scen.sceneGname)
+        scen.sceneGname = nil
         SW._scenarios[scen.id] = nil
       end, nil, CS.resolveTime
         * CIV.sevLerp(scen.severity, CS.resolveFactor.atMin, CS.resolveFactor.atMax))
@@ -330,6 +354,8 @@ function SW.startScenario(opts)
       CIV.msgAll("SWAT: intervention at " .. pt.name .. " FAILED (window expired).", 15)
       CIV.unmark(scen.circleId)
       CIV.Pool.release(pt)
+      releaseSceneLater(scen.sceneGname)
+      scen.sceneGname = nil
       SW._scenarios[scen.id] = nil
     end,
   })
@@ -347,6 +373,8 @@ function SW.cancel(scen)
   if scen.watch then CIV.Hover.unwatch(scen.watch) end
   CIV.unmark(scen.circleId)
   CIV.Pool.release(scen.pt)
+  releaseSceneLater(scen.sceneGname)
+  scen.sceneGname = nil
   SW._scenarios[scen.id] = nil
   return true
 end
