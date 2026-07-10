@@ -99,6 +99,12 @@ signal flares after dark (`rescue.signal` sets the night hours and the
 flare count). Fires also roll a KIND at ignition (`fire.kinds`): forest,
 landfill (thick smoke, slow) or industrial (fast), named in every report.
 
+At night players also have `Request illumination on nearest objective`: an
+illumination flare ignites 300 m over the closest active objective and the
+message gives bearing and range. Unidentified rescue subjects only get it
+over the approximate search area (the spotter stays relevant). Cooldown
+and search radius in `CIV.Config.nightAssist`.
+
 Each scene is ONE ground group (DCS ground groups can mix vehicles and
 infantry). It spawns ~15 m from the casualty so the hover center stays
 clean, and it is cleared `rescue.scenes.despawnDelay` seconds (default 300,

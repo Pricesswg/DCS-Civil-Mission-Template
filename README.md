@@ -117,6 +117,13 @@ its position. By day it pops orange smoke; by night (mission local time,
 sequence of green signal flares instead. Works the same for every rescue
 variant: mountain, sea, MedEvac and CASEVAC.
 
+**Night illumination assist**: a second F10 command, night only, pops an
+illumination flare 300 m over the nearest active objective (fire, SWAT
+objective, cargo pickup, fleeing vehicle) and reports its bearing and
+range. Rescue subjects not yet identified by a spotter get the flare over
+the APPROXIMATE search area, so the intel model stays intact. Per-player
+cooldown, tunable in `nightAssist`.
+
 **Fire kinds**: each ignition rolls what is burning (`fire.kinds`): a
 forest fire (flames), a landfill fire (thick dark smoke, slow growth) or an
 industrial fire (fast growth). The report and the F10 mark name the kind,

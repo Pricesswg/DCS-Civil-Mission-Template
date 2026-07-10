@@ -261,6 +261,94 @@ commands.help = function()
 end
 
 ----------------------------------------------------------------------
+-- NIGHT ASSIST (player F10 command, lives here because this file loads
+-- last and can see every module's active events)
+-- Pops an illumination flare over the nearest active objective. Night
+-- only, per-player cooldown. Rescue subjects not yet identified by a
+-- spotter get the flare on the APPROXIMATE search area, keeping the
+-- intel model honest.
+----------------------------------------------------------------------
+
+local assistCooldown = {}   -- unitName -> last request time
+
+local function nearestObjective(point)
+  local NA = C.nightAssist
+  local best, bestDist = nil, NA.searchRadius
+  local function consider(p, label)
+    if not p then return end
+    local d = CIV.dist2D(p, point)
+    if d < bestDist then best, bestDist = { point = p, label = label }, d end
+  end
+  for _, fire in pairs(CIV.Fire.actives()) do
+    consider(fire.point, fire.kindDef.name .. " at " .. fire.pt.name)
+  end
+  for _, sc in pairs(CIV.Rescue._scenarios) do
+    for _, evt in pairs(sc.events) do
+      if evt.identified then
+        consider(evt.point, sc.def.label .. " #" .. evt.id)
+      else
+        consider(evt.approxCenter, sc.def.label .. " #" .. evt.id ..
+          " search area (not identified)")
+      end
+    end
+  end
+  for _, scen in pairs(CIV.SWAT._scenarios) do
+    consider(scen.pt.point, "SWAT objective at " .. scen.pt.name)
+  end
+  for _, pt in pairs(CIV.Cargo._points) do
+    consider(pt.pt.point, "cargo pickup at " .. pt.pt.name)
+  end
+  for _, chase in pairs(CIV.Police._chases) do
+    local g = Group.getByName(chase.gname)
+    local u = g and g:getUnit(1)
+    if u and u:isExist() then
+      consider(u:getPoint(), "fleeing vehicle (chase #" .. chase.id .. ")")
+    end
+  end
+  return best, bestDist
+end
+
+local function nightAssist(uname)
+  local NA = C.nightAssist
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  if not CIV.isNight() then
+    CIV.msgUnit(u, "Illumination assist is available at night only.", 10)
+    return
+  end
+  local now = timer.getTime()
+  if assistCooldown[uname] and now - assistCooldown[uname] < NA.cooldownSeconds then
+    CIV.msgUnit(u, "Illumination assist recharging: " ..
+      math.ceil(NA.cooldownSeconds - (now - assistCooldown[uname])) .. " s left.", 10)
+    return
+  end
+  local p = u:getPoint()
+  local best, dist = nearestObjective(p)
+  if not best then
+    CIV.msgUnit(u, "No active objective within " ..
+      math.floor(NA.searchRadius / 1000) .. " km.", 10)
+    return
+  end
+  assistCooldown[uname] = now
+  local ip = { x = best.point.x,
+               y = CIV.groundY(best.point) + NA.heightAGL,
+               z = best.point.z }
+  local ok = pcall(trigger.action.illuminationBomb, ip, NA.power)
+  if not ok then pcall(trigger.action.illuminationBomb, ip) end
+  CIV.msgUnit(u, string.format(
+    "Illumination flare over %s: bearing %03d, %.1f km.",
+    best.label, CIV.bearingDeg(p, best.point), dist / 1000), 15)
+end
+CIV.Command.nightAssist = nightAssist
+
+CIV.Menu_register(function(gid, uname)
+  if not C.nightAssist.enabled then return end
+  missionCommands.addCommandForGroup(gid,
+    "Request illumination on nearest objective (night)",
+    CIV.rootMenu[gid], nightAssist, uname)
+end)
+
+----------------------------------------------------------------------
 -- MARKER EVENT HANDLER
 -- Commands are parsed from S_EVENT_MARK_ADDED / S_EVENT_MARK_CHANGE
 -- (the CHANGE event covers text typed after placing the mark). Each

@@ -435,6 +435,21 @@ CIV.Config = {
   },
 
   ------------------------------------------------------------------
+  -- Night assist: player F10 command that pops an illumination flare
+  -- over the nearest active objective (fire, SWAT objective, cargo
+  -- point, chase vehicle; rescue subjects get it on the APPROXIMATE
+  -- search area until a spotter identifies them, so the intel model
+  -- stays intact). Night only, with a per-player cooldown.
+  ------------------------------------------------------------------
+  nightAssist = {
+    enabled = true,
+    cooldownSeconds = 120,
+    searchRadius = 30000,   -- m, nearest objective within this range
+    heightAGL = 300,        -- m, illumination flare ignition height
+    power = 1000000,        -- illumination power (older builds ignore it)
+  },
+
+  ------------------------------------------------------------------
   -- Command center: game-master driven mission control via F10 map
   -- markers. Intended for a player in a Game Master / Tactical Commander
   -- slot (full map view, SRS, native asset control with Combined Arms),
