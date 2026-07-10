@@ -104,39 +104,53 @@ local function cancelNearest(point)
     local d = CIV.dist2D(p, point)
     if d < bestDist then best, bestDist = { label = label, fn = fn }, d end
   end
-  for _, fire in pairs(CIV.Fire.actives()) do
-    consider(fire.point, "wildfire at " .. fire.pt.name,
-      function() CIV.Fire.callOff(fire) end)
-  end
-  for _, sc in pairs(CIV.Rescue._scenarios) do
-    for _, evt in pairs(sc.events) do
-      consider(evt.point, sc.def.label .. " #" .. evt.id,
-        function() CIV.Rescue.cancel(evt) end)
+  if CIV.Fire then
+    for _, fire in pairs(CIV.Fire.actives()) do
+      consider(fire.point, "wildfire at " .. fire.pt.name,
+        function() CIV.Fire.callOff(fire) end)
     end
   end
-  for _, chase in pairs(CIV.Police._chases) do
-    local g = Group.getByName(chase.gname)
-    local u = g and g:getUnit(1)
-    if u and u:isExist() then
-      consider(u:getPoint(), "police chase #" .. chase.id,
-        function() CIV.Police.cancel(chase) end)
+  if CIV.Rescue then
+    for _, sc in pairs(CIV.Rescue._scenarios) do
+      for _, evt in pairs(sc.events) do
+        consider(evt.point, sc.def.label .. " #" .. evt.id,
+          function() CIV.Rescue.cancel(evt) end)
+      end
     end
   end
-  for _, scen in pairs(CIV.SWAT._scenarios) do
-    consider(scen.pt.point, "SWAT objective at " .. scen.pt.name,
-      function() CIV.SWAT.cancel(scen) end)
+  if CIV.Police then
+    for _, chase in pairs(CIV.Police._chases) do
+      local g = Group.getByName(chase.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        consider(u:getPoint(), "police chase #" .. chase.id,
+          function() CIV.Police.cancel(chase) end)
+      end
+    end
   end
-  for _, pt in pairs(CIV.Cargo._points) do
-    consider(pt.pt.point, "loading point at " .. pt.pt.name,
-      function() CIV.Cargo.cancel(pt) end)
+  if CIV.SWAT then
+    for _, scen in pairs(CIV.SWAT._scenarios) do
+      consider(scen.pt.point, "SWAT objective at " .. scen.pt.name,
+        function() CIV.SWAT.cancel(scen) end)
+    end
   end
-  for _, anomaly in pairs(CIV.Recon._anomalies) do
-    consider(anomaly.point, "recon anomaly at " .. anomaly.pt.name,
-      function() CIV.Recon.cancel(anomaly) end)
+  if CIV.Cargo then
+    for _, pt in pairs(CIV.Cargo._points) do
+      consider(pt.pt.point, "loading point at " .. pt.pt.name,
+        function() CIV.Cargo.cancel(pt) end)
+    end
   end
-  for _, job in pairs(CIV.VIP._jobs) do
-    consider(job.from.point, "VIP shuttle from " .. job.from.name,
-      function() CIV.VIP.cancel(job) end)
+  if CIV.Recon then
+    for _, anomaly in pairs(CIV.Recon._anomalies) do
+      consider(anomaly.point, "recon anomaly at " .. anomaly.pt.name,
+        function() CIV.Recon.cancel(anomaly) end)
+    end
+  end
+  if CIV.VIP then
+    for _, job in pairs(CIV.VIP._jobs) do
+      consider(job.from.point, "VIP shuttle from " .. job.from.name,
+        function() CIV.VIP.cancel(job) end)
+    end
   end
   if best then
     best.fn()
@@ -148,7 +162,12 @@ end
 
 local commands = {}
 
+local function moduleMissing(name)
+  say(name .. " module is not loaded in this mission.")
+end
+
 commands.fire = function(args, point)
+  if not CIV.Fire then moduleMissing("firefighting") return end
   local fire = CIV.Fire.igniteAt(point, toSeverity(args[1]))
   if not fire then say("fire command failed.") end
 end
@@ -157,6 +176,7 @@ local rescueKeys = { sarm = "SAR_MOUNTAIN", sars = "SAR_SEA",
                      medevac = "MEDEVAC", casevac = "CASEVAC" }
 for word, key in pairs(rescueKeys) do
   commands[word] = function(args, point)
+    if not CIV.Rescue then moduleMissing("rescue") return end
     if not CIV.Rescue.startEvent(key, { point = point, severity = toSeverity(args[1]) }) then
       say(word .. " command failed (check the position).")
     end
@@ -164,24 +184,28 @@ for word, key in pairs(rescueKeys) do
 end
 
 commands.swat = function(args, point)
+  if not CIV.SWAT then moduleMissing("police") return end
   if not CIV.SWAT.startScenario({ point = point, severity = toSeverity(args[1]) }) then
     say("swat command failed.")
   end
 end
 
 commands.chase = function(args, point)
+  if not CIV.Police then moduleMissing("police") return end
   if not CIV.Police.startChase({ point = point, severity = toSeverity(args[1]) }) then
     say("chase command failed (no free crossroad in the police pool).")
   end
 end
 
 commands.recon = function(args, point)
+  if not CIV.Recon then moduleMissing("aviation") return end
   if not CIV.Recon.start({ point = point, severity = toSeverity(args[1]) }) then
     say("recon command failed.")
   end
 end
 
 commands.vip = function(args, point)
+  if not CIV.VIP then moduleMissing("aviation") return end
   if not CIV.VIP.start({ point = point, severity = toSeverity(args[1]) }) then
     say("vip command failed (needs at least 2 CIVIL VIP Pad zones).")
   end
@@ -193,6 +217,7 @@ commands.cargo = function(args, point)
     say("unknown tier '" .. args[1] .. "' (light/medium/heavy/heavy_lift).")
     return
   end
+  if not CIV.Cargo then moduleMissing("transport") return end
   if not CIV.Cargo.startPoint(tier, { point = point, priority = toSeverity(args[2]) }) then
     say("cargo command failed.")
   end
@@ -304,16 +329,20 @@ end
 if C.recap.enabled then
   CIV.schedule(function(_, t)
     local rescueCount = 0
-    for _, sc in pairs(CIV.Rescue._scenarios) do
-      rescueCount = rescueCount + countTable(sc.events)
+    if CIV.Rescue then
+      for _, sc in pairs(CIV.Rescue._scenarios) do
+        rescueCount = rescueCount + countTable(sc.events)
+      end
     end
     local txt = string.format(
       "=== SITUATION RECAP ===\nFires %d | Rescue %d | SWAT %d | Chases %d " ..
       "| Cargo %d | Recon %d | VIP %d",
-      countTable(CIV.Fire.actives()), rescueCount,
-      countTable(CIV.SWAT._scenarios), countTable(CIV.Police._chases),
-      countTable(CIV.Cargo._points), countTable(CIV.Recon._anomalies),
-      countTable(CIV.VIP._jobs))
+      CIV.Fire and countTable(CIV.Fire.actives()) or 0, rescueCount,
+      CIV.SWAT and countTable(CIV.SWAT._scenarios) or 0,
+      CIV.Police and countTable(CIV.Police._chases) or 0,
+      CIV.Cargo and countTable(CIV.Cargo._points) or 0,
+      CIV.Recon and countTable(CIV.Recon._anomalies) or 0,
+      CIV.VIP and countTable(CIV.VIP._jobs) or 0)
     local rows = topThree()
     if #rows > 0 then
       txt = txt .. "\nLeaders:"
@@ -359,30 +388,40 @@ local function nearestObjective(point)
     local d = CIV.dist2D(p, point)
     if d < bestDist then best, bestDist = { point = p, label = label }, d end
   end
-  for _, fire in pairs(CIV.Fire.actives()) do
-    consider(fire.point, fire.kindDef.name .. " at " .. fire.pt.name)
+  if CIV.Fire then
+    for _, fire in pairs(CIV.Fire.actives()) do
+      consider(fire.point, fire.kindDef.name .. " at " .. fire.pt.name)
+    end
   end
-  for _, sc in pairs(CIV.Rescue._scenarios) do
-    for _, evt in pairs(sc.events) do
-      if evt.identified then
-        consider(evt.point, sc.def.label .. " #" .. evt.id)
-      else
-        consider(evt.approxCenter, sc.def.label .. " #" .. evt.id ..
-          " search area (not identified)")
+  if CIV.Rescue then
+    for _, sc in pairs(CIV.Rescue._scenarios) do
+      for _, evt in pairs(sc.events) do
+        if evt.identified then
+          consider(evt.point, sc.def.label .. " #" .. evt.id)
+        else
+          consider(evt.approxCenter, sc.def.label .. " #" .. evt.id ..
+            " search area (not identified)")
+        end
       end
     end
   end
-  for _, scen in pairs(CIV.SWAT._scenarios) do
-    consider(scen.pt.point, "SWAT objective at " .. scen.pt.name)
+  if CIV.SWAT then
+    for _, scen in pairs(CIV.SWAT._scenarios) do
+      consider(scen.pt.point, "SWAT objective at " .. scen.pt.name)
+    end
   end
-  for _, pt in pairs(CIV.Cargo._points) do
-    consider(pt.pt.point, "cargo pickup at " .. pt.pt.name)
+  if CIV.Cargo then
+    for _, pt in pairs(CIV.Cargo._points) do
+      consider(pt.pt.point, "cargo pickup at " .. pt.pt.name)
+    end
   end
-  for _, chase in pairs(CIV.Police._chases) do
-    local g = Group.getByName(chase.gname)
-    local u = g and g:getUnit(1)
-    if u and u:isExist() then
-      consider(u:getPoint(), "fleeing vehicle (chase #" .. chase.id .. ")")
+  if CIV.Police then
+    for _, chase in pairs(CIV.Police._chases) do
+      local g = Group.getByName(chase.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        consider(u:getPoint(), "fleeing vehicle (chase #" .. chase.id .. ")")
+      end
     end
   end
   return best, bestDist

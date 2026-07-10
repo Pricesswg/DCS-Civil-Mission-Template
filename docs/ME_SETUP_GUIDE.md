@@ -22,8 +22,13 @@ dist/CivilMissionTemplate.lua
 ```
 
 **B) Modular (for development/testing)**: one `DO SCRIPT FILE` action per
-file, in this order (core first, the others in any order; unused modules
-can simply be omitted):
+file. ORDER MATTERS: DCS executes the actions of a trigger top to bottom,
+in the order you add them, so keep the files in ascending numeric order.
+That is exactly what the number prefixes are for. Hard rules: `01` must be
+FIRST (every module depends on it) and `50` must be LAST (it looks into
+every other module); the files in between only depend on the core, so
+their relative order is free. Unused modules can simply be omitted: the
+media/recap/game-master features detect missing modules and skip them.
 
 ```
 Scripts/01_CivilCore.lua        <- ALWAYS, first

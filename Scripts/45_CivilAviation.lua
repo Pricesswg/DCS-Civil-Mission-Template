@@ -291,29 +291,38 @@ local CM = C.media
 local filmTime = {}   -- unitName .. "|" .. eventKey -> seconds
 local aired = {}      -- eventKey -> true (one story per event)
 
--- active events worth filming: { key, point, label }
+-- active events worth filming: { key, point, label }. Every module lookup
+-- is guarded, so leaving intervention files out of the load list is safe.
 local function filmableEvents()
   local list = {}
-  for _, fire in pairs(CIV.Fire.actives()) do
-    list[#list + 1] = { key = "fire" .. fire.id, point = fire.point,
-      label = fire.kindDef.name .. " at " .. fire.pt.name }
-  end
-  for _, sc in pairs(CIV.Rescue._scenarios) do
-    for _, evt in pairs(sc.events) do
-      list[#list + 1] = { key = sc.def.key .. evt.id, point = evt.point,
-        label = sc.def.label .. " #" .. evt.id }
+  if CIV.Fire then
+    for _, fire in pairs(CIV.Fire.actives()) do
+      list[#list + 1] = { key = "fire" .. fire.id, point = fire.point,
+        label = fire.kindDef.name .. " at " .. fire.pt.name }
     end
   end
-  for _, scen in pairs(CIV.SWAT._scenarios) do
-    list[#list + 1] = { key = "swat" .. scen.id, point = scen.pt.point,
-      label = "SWAT operation at " .. scen.pt.name }
+  if CIV.Rescue then
+    for _, sc in pairs(CIV.Rescue._scenarios) do
+      for _, evt in pairs(sc.events) do
+        list[#list + 1] = { key = sc.def.key .. evt.id, point = evt.point,
+          label = sc.def.label .. " #" .. evt.id }
+      end
+    end
   end
-  for _, chase in pairs(CIV.Police._chases) do
-    local g = Group.getByName(chase.gname)
-    local u = g and g:getUnit(1)
-    if u and u:isExist() then
-      list[#list + 1] = { key = "chase" .. chase.id, point = u:getPoint(),
-        label = "police chase #" .. chase.id }
+  if CIV.SWAT then
+    for _, scen in pairs(CIV.SWAT._scenarios) do
+      list[#list + 1] = { key = "swat" .. scen.id, point = scen.pt.point,
+        label = "SWAT operation at " .. scen.pt.name }
+    end
+  end
+  if CIV.Police then
+    for _, chase in pairs(CIV.Police._chases) do
+      local g = Group.getByName(chase.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        list[#list + 1] = { key = "chase" .. chase.id, point = u:getPoint(),
+          label = "police chase #" .. chase.id }
+      end
     end
   end
   return list

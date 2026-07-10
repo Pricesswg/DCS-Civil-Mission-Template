@@ -37,7 +37,11 @@ docs/
 1. Add **CJTF Blue** to the blue coalition (all scripted spawns run under it).
 2. Create the trigger zones from the checklist below.
 3. Load `dist/CivilMissionTemplate.lua` with a single `DO SCRIPT FILE` action
-   at MISSION START (or the five `Scripts/` files in order, core first).
+   at MISSION START. If you load the `Scripts/` files individually instead,
+   ORDER MATTERS: DCS runs `DO SCRIPT FILE` actions top to bottom, so add
+   them in ascending numeric order. The prefixes ARE the load order: `01`
+   first (everything depends on it), `50` last (it looks into every other
+   module). Modules you do not use can be skipped, the rest adapts.
 4. In game: `F10 -> Civil Missions` (the `Admin (test)` submenu starts any
    event manually).
 
