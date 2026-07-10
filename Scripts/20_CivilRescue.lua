@@ -248,7 +248,10 @@ end
 -- reference point/name for the low-precision initial report: the scenario
 -- region if defined, otherwise the nearest hospital pad
 local function vagueReference(def, point)
-  local region = def.region and CIV.Zones.byName(def.region)
+  -- with several macro-regions per scenario, use the one containing the
+  -- subject (fallback: the nearest one), and report ITS name
+  local region = def.region
+    and (CIV.Zones.containing(def.region, point) or CIV.Zones.nearest(def.region, point))
   if region then
     return { x = region.center.x, z = region.center.z }, region.name
   end
@@ -544,7 +547,7 @@ R.requestSignal = requestSignal
 CIV.schedule(function(_, t)
   local detectR = C.rescue.intel.spotterDetectRadius
   for _, sc in pairs(R._scenarios) do
-    local region = sc.def.region and CIV.Zones.byName(sc.def.region)
+    local regionPrefix = sc.def.region
     for _, evt in pairs(sc.events) do
       if not evt.identified then
         local spotter = nil
@@ -552,7 +555,7 @@ CIV.schedule(function(_, t)
           if spotter then return end
           if info.category ~= Unit.Category.AIRPLANE or not u:inAir() then return end
           local p = u:getPoint()
-          if (region and CIV.Zones.contains(region, p))
+          if (regionPrefix and CIV.Zones.containing(regionPrefix, p))
              or CIV.dist2D(p, evt.point) <= detectR then
             spotter = info
           end

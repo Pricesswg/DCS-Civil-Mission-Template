@@ -52,22 +52,30 @@ STARTS with the prefix belongs to that pool: e.g. `CIVIL Fire Point Alpha`,
 required. Zones can be **circular or polygon (quad) zones**: vertices and
 properties are read from `env.mission`.
 
+The prefix rule covers the MACRO-AREAS as well: place as many regions of
+the same type as the mission needs (`CIVIL Fire Region North` and `CIVIL
+Fire Region South`, two mountain SAR regions on separate ranges, several
+reload aprons, cargo destinations or SWAT bases). The scripts check every
+matching area: line drops and spotters work inside any fire region, rescue
+reports name the region the subject actually belongs to, deliveries count
+in any destination zone.
+
 | Prefix / zone name | Use | Placement notes |
 |---|---|---|
-| `CIVIL Fire Region` | firefighting macro-region | large; enables the spotter and the C-130 line drop |
+| `CIVIL Fire Region ...` | firefighting macro-region(s) | large; enable the spotter and the C-130 line drop; several regions of the same type are fine |
 | `CIVIL Fire Point ...` | fire ignition points | forest/fields, away from buildings and roads |
 | `CIVIL Fire Station ...` | fire brigade depots | trucks depart from the nearest one and drive "On Road" to the fire |
 | `CIVIL Water Point ...` | helicopter water pickup | on a body of water, with maneuvering room |
-| `CIVIL C130 Reload` | C-130 retardant reload | apron reachable on the ground. USER-BUILT static area: decorate it yourself (`autoDress.c130Reload = false` by default) |
-| `CIVIL SAR Mountain Region` + `CIVIL SAR Mountain Point ...` | mountain SAR | points reachable in a hover |
-| `CIVIL SAR Sea Region` + `CIVIL SAR Sea Point ...` | sea SAR | points on OPEN water (a boat spawns there) |
+| `CIVIL C130 Reload ...` | C-130 retardant reload apron(s) | reachable on the ground. USER-BUILT static area: decorate it yourself (`autoDress.c130Reload = false` by default) |
+| `CIVIL SAR Mountain Region ...` + `CIVIL SAR Mountain Point ...` | mountain SAR | region(s) can cover separate ranges; points reachable in a hover |
+| `CIVIL SAR Sea Region ...` + `CIVIL SAR Sea Point ...` | sea SAR | points on OPEN water (a boat spawns there) |
 | `CIVIL Police Point ...` | chase | 30-40 points ON real crossroads, neighbor distance <= 1500 m |
-| `CIVIL SWAT Base` | team boarding | apron where the helicopter can land |
+| `CIVIL SWAT Base ...` | team boarding | apron(s) where the helicopter can land |
 | `CIVIL SWAT Point ...` | SWAT scenarios | rooftops / urban LZs (rooftop spawn TO TEST) |
 | `CIVIL Cargo Point ...` | cargo loading points | flat ground |
 | `CIVIL Recon Point ...` | inspection corridor | 5+ zones along a power line or pipeline; anomalies spawn on them |
 | `CIVIL VIP Pad ...` | passenger shuttle pads | at least 2 helipads; pickup and destination drawn from this pool |
-| `CIVIL Cargo Destination` | cargo delivery | single destination zone |
+| `CIVIL Cargo Destination ...` | cargo delivery | one or more destination zones; deliveries and supply airdrops count in any of them |
 | `CIVIL Medevac Point ...` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point ...` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
 | `CIVIL Hospital ...` | hospital pads | on the actual pad; auto-dressed with the medical camp kit (`autoDress.hospitals = false` to disable); delivery is ZONE-detected (still+low), no FARP needed |

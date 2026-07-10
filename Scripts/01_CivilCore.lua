@@ -903,6 +903,28 @@ function CIV.Zones.contains(area, p)
   return CIV.dist2D(p, area.center) <= area.radius
 end
 
+-- Every configured zone name is a PREFIX: one zone or many (e.g.
+-- "CIVIL Fire Region North" and "CIVIL Fire Region South" both belong to
+-- the "CIVIL Fire Region" macro-area). These helpers work on the whole set.
+
+-- the area matching the prefix that contains p, or nil
+function CIV.Zones.containing(prefix, p)
+  for _, area in ipairs(CIV.Zones.byPrefix(prefix)) do
+    if CIV.Zones.contains(area, p) then return area end
+  end
+  return nil
+end
+
+-- the area matching the prefix whose center is closest to p, or nil
+function CIV.Zones.nearest(prefix, p)
+  local best, bestDist = nil, 1e12
+  for _, area in ipairs(CIV.Zones.byPrefix(prefix)) do
+    local d = CIV.dist2D({ x = area.center.x, z = area.center.z }, p)
+    if d < bestDist then best, bestDist = area, d end
+  end
+  return best
+end
+
 function CIV.Templates.byPrefix(prefix)
   local res = {}
   for _, t in ipairs(CIV.Templates._groups) do
@@ -1665,8 +1687,10 @@ end)
 -- initial dressing of fixed areas (only where auto-dressing is enabled:
 -- user-built static areas like the C-130 reload keep their own decoration)
 CIV.schedule(function()
-  if CIV.Config.autoDress.c130Reload and CIV.Zones.byName(CIV.Config.zones.c130Reload) then
-    CIV.Dressing.spawn(CIV.Config.zones.c130Reload, "c130_loading_area")
+  if CIV.Config.autoDress.c130Reload then
+    for _, area in ipairs(CIV.Zones.byPrefix(CIV.Config.zones.c130Reload)) do
+      CIV.Dressing.spawn(area.name, "c130_loading_area")
+    end
   end
   if CIV.Config.autoDress.hospitals then
     for _, pt in ipairs(CIV.Pool.load(CIV.Config.zones.hospitals)) do
@@ -1675,16 +1699,18 @@ CIV.schedule(function()
   end
 end, nil, 5)
 
--- theme-area overlays on the F10 map (regions, reload, destination, base)
+-- theme-area overlays on the F10 map: every zone matching each configured
+-- prefix gets the outline (multiple macro-areas per type are supported)
 CIV.schedule(function()
   local cfg = CIV.Config.marks.regions
   if not cfg.enabled then return end
   for _, entry in ipairs(cfg.list) do
     local zoneName = CIV.Config.zones[entry.zoneKey]
-    local area = zoneName and CIV.Zones.byName(zoneName)
-    if area then
-      CIV.drawZoneOutline(area, entry.label,
-        { border = entry.border, fill = entry.fill })
+    if zoneName then
+      for _, area in ipairs(CIV.Zones.byPrefix(zoneName)) do
+        CIV.drawZoneOutline(area, entry.label,
+          { border = entry.border, fill = entry.fill })
+      end
     end
   end
 end, nil, 4)

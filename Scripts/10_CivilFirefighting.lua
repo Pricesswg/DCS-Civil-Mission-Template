@@ -429,10 +429,10 @@ end
 -- support takes off clean with no interaction. Requesting the load starts
 -- a hold timer; moving before it expires aborts the loading.
 local function stoppedInReloadZone(u)
-  local zone = CIV.Zones.byName(C.zones.c130Reload)
-  if not zone then return false end
-  return (not u:inAir()) and CIV.speed(u:getVelocity()) < 1
-    and CIV.Zones.contains(zone, u:getPoint())
+  if (not u:inAir()) and CIV.speed(u:getVelocity()) < 1 then
+    return CIV.Zones.containing(C.zones.c130Reload, u:getPoint()) ~= nil
+  end
+  return false
 end
 
 local function loadRetardant(uname)
@@ -479,10 +479,10 @@ local function startLineDrop(uname)
       C.zones.c130Reload .. " zone.", 10)
     return
   end
-  local region = CIV.Zones.byName(C.zones.fireRegion)
   local p = u:getPoint()
-  if region and not CIV.Zones.contains(region, p) then
-    CIV.msgUnit(u, "You are outside the fire region.", 10)
+  if #CIV.Zones.byPrefix(C.zones.fireRegion) > 0
+     and not CIV.Zones.containing(C.zones.fireRegion, p) then
+    CIV.msgUnit(u, "You are outside every fire region.", 10)
     return
   end
   local agl = CIV.agl(p)
@@ -596,12 +596,12 @@ end
 
 -- spotter: any player airplane inside the fire region relays fire intel
 CIV.schedule(function(_, t)
-  local region = CIV.Zones.byName(C.zones.fireRegion)
-  if not region then return t + 120 end
+  if #CIV.Zones.byPrefix(C.zones.fireRegion) == 0 then return t + 120 end
   local spotter = nil
   CIV.forEachPlayer(function(u, info)
     if spotter then return end
-    if isAirplane(info) and u:inAir() and CIV.Zones.contains(region, u:getPoint()) then
+    if isAirplane(info) and u:inAir()
+       and CIV.Zones.containing(C.zones.fireRegion, u:getPoint()) then
       spotter = info
     end
   end)

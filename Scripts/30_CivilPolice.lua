@@ -266,21 +266,20 @@ local function boardTeam(uname)
     CIV.msgUnit(u, "Team already aboard (" .. st.squad .. " operators).", 10)
     return
   end
-  local zone = CIV.Zones.byName(C.zones.swatBase)
-  if not zone then
-    CIV.msgUnit(u, "Zone '" .. C.zones.swatBase .. "' is not defined in the mission.", 10)
+  if #CIV.Zones.byPrefix(C.zones.swatBase) == 0 then
+    CIV.msgUnit(u, "No '" .. C.zones.swatBase .. "' zone is defined in the mission.", 10)
     return
   end
-  if u:inAir() or not CIV.Zones.contains(zone, u:getPoint())
+  if u:inAir() or not CIV.Zones.containing(C.zones.swatBase, u:getPoint())
      or CIV.speed(u:getVelocity()) > 1 then
-    CIV.msgUnit(u, "You must be LANDED and stationary inside the SWAT base.", 10)
+    CIV.msgUnit(u, "You must be LANDED and stationary inside a SWAT base.", 10)
     return
   end
   CIV.msgUnit(u, "Boarding team: stay put for " .. CS.boardingTime .. " seconds.", 10)
   CIV.schedule(function()
     local u2 = Unit.getByName(uname)
     if not u2 or not u2:isExist() then return end
-    if u2:inAir() or not CIV.Zones.contains(zone, u2:getPoint())
+    if u2:inAir() or not CIV.Zones.containing(C.zones.swatBase, u2:getPoint())
        or CIV.speed(u2:getVelocity()) > 1 then
       CIV.msgUnit(u2, "Boarding aborted: you moved.", 10)
       return

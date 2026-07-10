@@ -913,6 +913,28 @@ function CIV.Zones.contains(area, p)
   return CIV.dist2D(p, area.center) <= area.radius
 end
 
+-- Every configured zone name is a PREFIX: one zone or many (e.g.
+-- "CIVIL Fire Region North" and "CIVIL Fire Region South" both belong to
+-- the "CIVIL Fire Region" macro-area). These helpers work on the whole set.
+
+-- the area matching the prefix that contains p, or nil
+function CIV.Zones.containing(prefix, p)
+  for _, area in ipairs(CIV.Zones.byPrefix(prefix)) do
+    if CIV.Zones.contains(area, p) then return area end
+  end
+  return nil
+end
+
+-- the area matching the prefix whose center is closest to p, or nil
+function CIV.Zones.nearest(prefix, p)
+  local best, bestDist = nil, 1e12
+  for _, area in ipairs(CIV.Zones.byPrefix(prefix)) do
+    local d = CIV.dist2D({ x = area.center.x, z = area.center.z }, p)
+    if d < bestDist then best, bestDist = area, d end
+  end
+  return best
+end
+
 function CIV.Templates.byPrefix(prefix)
   local res = {}
   for _, t in ipairs(CIV.Templates._groups) do
@@ -1675,8 +1697,10 @@ end)
 -- initial dressing of fixed areas (only where auto-dressing is enabled:
 -- user-built static areas like the C-130 reload keep their own decoration)
 CIV.schedule(function()
-  if CIV.Config.autoDress.c130Reload and CIV.Zones.byName(CIV.Config.zones.c130Reload) then
-    CIV.Dressing.spawn(CIV.Config.zones.c130Reload, "c130_loading_area")
+  if CIV.Config.autoDress.c130Reload then
+    for _, area in ipairs(CIV.Zones.byPrefix(CIV.Config.zones.c130Reload)) do
+      CIV.Dressing.spawn(area.name, "c130_loading_area")
+    end
   end
   if CIV.Config.autoDress.hospitals then
     for _, pt in ipairs(CIV.Pool.load(CIV.Config.zones.hospitals)) do
@@ -1685,16 +1709,18 @@ CIV.schedule(function()
   end
 end, nil, 5)
 
--- theme-area overlays on the F10 map (regions, reload, destination, base)
+-- theme-area overlays on the F10 map: every zone matching each configured
+-- prefix gets the outline (multiple macro-areas per type are supported)
 CIV.schedule(function()
   local cfg = CIV.Config.marks.regions
   if not cfg.enabled then return end
   for _, entry in ipairs(cfg.list) do
     local zoneName = CIV.Config.zones[entry.zoneKey]
-    local area = zoneName and CIV.Zones.byName(zoneName)
-    if area then
-      CIV.drawZoneOutline(area, entry.label,
-        { border = entry.border, fill = entry.fill })
+    if zoneName then
+      for _, area in ipairs(CIV.Zones.byPrefix(zoneName)) do
+        CIV.drawZoneOutline(area, entry.label,
+          { border = entry.border, fill = entry.fill })
+      end
     end
   end
 end, nil, 4)
@@ -2147,10 +2173,10 @@ end
 -- support takes off clean with no interaction. Requesting the load starts
 -- a hold timer; moving before it expires aborts the loading.
 local function stoppedInReloadZone(u)
-  local zone = CIV.Zones.byName(C.zones.c130Reload)
-  if not zone then return false end
-  return (not u:inAir()) and CIV.speed(u:getVelocity()) < 1
-    and CIV.Zones.contains(zone, u:getPoint())
+  if (not u:inAir()) and CIV.speed(u:getVelocity()) < 1 then
+    return CIV.Zones.containing(C.zones.c130Reload, u:getPoint()) ~= nil
+  end
+  return false
 end
 
 local function loadRetardant(uname)
@@ -2197,10 +2223,10 @@ local function startLineDrop(uname)
       C.zones.c130Reload .. " zone.", 10)
     return
   end
-  local region = CIV.Zones.byName(C.zones.fireRegion)
   local p = u:getPoint()
-  if region and not CIV.Zones.contains(region, p) then
-    CIV.msgUnit(u, "You are outside the fire region.", 10)
+  if #CIV.Zones.byPrefix(C.zones.fireRegion) > 0
+     and not CIV.Zones.containing(C.zones.fireRegion, p) then
+    CIV.msgUnit(u, "You are outside every fire region.", 10)
     return
   end
   local agl = CIV.agl(p)
@@ -2314,12 +2340,12 @@ end
 
 -- spotter: any player airplane inside the fire region relays fire intel
 CIV.schedule(function(_, t)
-  local region = CIV.Zones.byName(C.zones.fireRegion)
-  if not region then return t + 120 end
+  if #CIV.Zones.byPrefix(C.zones.fireRegion) == 0 then return t + 120 end
   local spotter = nil
   CIV.forEachPlayer(function(u, info)
     if spotter then return end
-    if isAirplane(info) and u:inAir() and CIV.Zones.contains(region, u:getPoint()) then
+    if isAirplane(info) and u:inAir()
+       and CIV.Zones.containing(C.zones.fireRegion, u:getPoint()) then
       spotter = info
     end
   end)
@@ -2630,7 +2656,10 @@ end
 -- reference point/name for the low-precision initial report: the scenario
 -- region if defined, otherwise the nearest hospital pad
 local function vagueReference(def, point)
-  local region = def.region and CIV.Zones.byName(def.region)
+  -- with several macro-regions per scenario, use the one containing the
+  -- subject (fallback: the nearest one), and report ITS name
+  local region = def.region
+    and (CIV.Zones.containing(def.region, point) or CIV.Zones.nearest(def.region, point))
   if region then
     return { x = region.center.x, z = region.center.z }, region.name
   end
@@ -2926,7 +2955,7 @@ R.requestSignal = requestSignal
 CIV.schedule(function(_, t)
   local detectR = C.rescue.intel.spotterDetectRadius
   for _, sc in pairs(R._scenarios) do
-    local region = sc.def.region and CIV.Zones.byName(sc.def.region)
+    local regionPrefix = sc.def.region
     for _, evt in pairs(sc.events) do
       if not evt.identified then
         local spotter = nil
@@ -2934,7 +2963,7 @@ CIV.schedule(function(_, t)
           if spotter then return end
           if info.category ~= Unit.Category.AIRPLANE or not u:inAir() then return end
           local p = u:getPoint()
-          if (region and CIV.Zones.contains(region, p))
+          if (regionPrefix and CIV.Zones.containing(regionPrefix, p))
              or CIV.dist2D(p, evt.point) <= detectR then
             spotter = info
           end
@@ -3367,21 +3396,20 @@ local function boardTeam(uname)
     CIV.msgUnit(u, "Team already aboard (" .. st.squad .. " operators).", 10)
     return
   end
-  local zone = CIV.Zones.byName(C.zones.swatBase)
-  if not zone then
-    CIV.msgUnit(u, "Zone '" .. C.zones.swatBase .. "' is not defined in the mission.", 10)
+  if #CIV.Zones.byPrefix(C.zones.swatBase) == 0 then
+    CIV.msgUnit(u, "No '" .. C.zones.swatBase .. "' zone is defined in the mission.", 10)
     return
   end
-  if u:inAir() or not CIV.Zones.contains(zone, u:getPoint())
+  if u:inAir() or not CIV.Zones.containing(C.zones.swatBase, u:getPoint())
      or CIV.speed(u:getVelocity()) > 1 then
-    CIV.msgUnit(u, "You must be LANDED and stationary inside the SWAT base.", 10)
+    CIV.msgUnit(u, "You must be LANDED and stationary inside a SWAT base.", 10)
     return
   end
   CIV.msgUnit(u, "Boarding team: stay put for " .. CS.boardingTime .. " seconds.", 10)
   CIV.schedule(function()
     local u2 = Unit.getByName(uname)
     if not u2 or not u2:isExist() then return end
-    if u2:inAir() or not CIV.Zones.contains(zone, u2:getPoint())
+    if u2:inAir() or not CIV.Zones.containing(C.zones.swatBase, u2:getPoint())
        or CIV.speed(u2:getVelocity()) > 1 then
       CIV.msgUnit(u2, "Boarding aborted: you moved.", 10)
       return
@@ -3705,8 +3733,7 @@ end
 ----------------------------------------------------------------------
 
 CIV.schedule(function(_, t)
-  local dest = CIV.Zones.byName(C.zones.cargoDestination)
-  if not dest then return t + 60 end
+  if #CIV.Zones.byPrefix(C.zones.cargoDestination) == 0 then return t + 60 end
   for id, point in pairs(CG._points) do
     -- urgent loads expire if nobody delivers them in time
     if timer.getTime() > point.expiresAt then
@@ -3722,7 +3749,7 @@ CIV.schedule(function(_, t)
         closePoint(point)
       else
         local p = s:getPoint()
-        if CIV.Zones.contains(dest, p) and CIV.agl(p) < 5
+        if CIV.Zones.containing(C.zones.cargoDestination, p) and CIV.agl(p) < 5
            and CIV.dist2D(p, point.spawnPos) > 500 then
           -- delivered: credit the closest player helicopter
           local closest, minDist = nil, 1e9
@@ -3761,8 +3788,7 @@ if CC.airdrop.enabled then
   local matchesType = CIV.Airdrop.typeMatcher(CC.airdrop.containerTypes)
 
   local function supplyDelivered(impact)
-    local dest = CIV.Zones.byName(C.zones.cargoDestination)
-    if not dest or not CIV.Zones.contains(dest, impact) then return false end
+    if not CIV.Zones.containing(C.zones.cargoDestination, impact) then return false end
     CG.airdropped = CG.airdropped + 1
     local playerInfo = CIV.nearestPlayerAirplane(impact, CC.airdrop.creditRadius)
     if playerInfo then
@@ -3787,27 +3813,29 @@ if CC.airdrop.enabled then
     if not (world.searchObjects and world.VolumeType and Object and Object.Category) then
       return t + 60
     end
-    local dest = CIV.Zones.byName(C.zones.cargoDestination)
-    if not dest then return t + 60 end
-    local center = { x = dest.center.x,
-                     y = land.getHeight({ x = dest.center.x, y = dest.center.z }),
-                     z = dest.center.z }
-    local volume = { id = world.VolumeType.SPHERE,
-                     params = { point = center, radius = dest.radius } }
-    pcall(world.searchObjects, Object.Category.STATIC, volume, function(obj)
-      local ok, name = pcall(function() return obj:getName() end)
-      if ok and name and not processedObjects[name]
-         and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
-        processedObjects[name] = true
-        local okT, typeName = pcall(function() return obj:getTypeName() end)
-        if CC.airdrop.matchAnyObject or (okT and typeName and matchesType(typeName)) then
-          CIV.dbg("Foreign cargo object in destination zone: " .. tostring(name))
-          local ok2, p = pcall(function() return obj:getPoint() end)
-          if ok2 and p then supplyDelivered(p) end
+    local dests = CIV.Zones.byPrefix(C.zones.cargoDestination)
+    if #dests == 0 then return t + 60 end
+    for _, dest in ipairs(dests) do
+      local center = { x = dest.center.x,
+                       y = land.getHeight({ x = dest.center.x, y = dest.center.z }),
+                       z = dest.center.z }
+      local volume = { id = world.VolumeType.SPHERE,
+                       params = { point = center, radius = dest.radius } }
+      pcall(world.searchObjects, Object.Category.STATIC, volume, function(obj)
+        local ok, name = pcall(function() return obj:getName() end)
+        if ok and name and not processedObjects[name]
+           and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
+          processedObjects[name] = true
+          local okT, typeName = pcall(function() return obj:getTypeName() end)
+          if CC.airdrop.matchAnyObject or (okT and typeName and matchesType(typeName)) then
+            CIV.dbg("Foreign cargo object in destination zone: " .. tostring(name))
+            local ok2, p = pcall(function() return obj:getPoint() end)
+            if ok2 and p then supplyDelivered(p) end
+          end
         end
-      end
-      return true
-    end)
+        return true
+      end)
+    end
     return t + 5
   end, nil, 12)
 end

@@ -200,8 +200,7 @@ end
 ----------------------------------------------------------------------
 
 CIV.schedule(function(_, t)
-  local dest = CIV.Zones.byName(C.zones.cargoDestination)
-  if not dest then return t + 60 end
+  if #CIV.Zones.byPrefix(C.zones.cargoDestination) == 0 then return t + 60 end
   for id, point in pairs(CG._points) do
     -- urgent loads expire if nobody delivers them in time
     if timer.getTime() > point.expiresAt then
@@ -217,7 +216,7 @@ CIV.schedule(function(_, t)
         closePoint(point)
       else
         local p = s:getPoint()
-        if CIV.Zones.contains(dest, p) and CIV.agl(p) < 5
+        if CIV.Zones.containing(C.zones.cargoDestination, p) and CIV.agl(p) < 5
            and CIV.dist2D(p, point.spawnPos) > 500 then
           -- delivered: credit the closest player helicopter
           local closest, minDist = nil, 1e9
@@ -256,8 +255,7 @@ if CC.airdrop.enabled then
   local matchesType = CIV.Airdrop.typeMatcher(CC.airdrop.containerTypes)
 
   local function supplyDelivered(impact)
-    local dest = CIV.Zones.byName(C.zones.cargoDestination)
-    if not dest or not CIV.Zones.contains(dest, impact) then return false end
+    if not CIV.Zones.containing(C.zones.cargoDestination, impact) then return false end
     CG.airdropped = CG.airdropped + 1
     local playerInfo = CIV.nearestPlayerAirplane(impact, CC.airdrop.creditRadius)
     if playerInfo then
@@ -282,27 +280,29 @@ if CC.airdrop.enabled then
     if not (world.searchObjects and world.VolumeType and Object and Object.Category) then
       return t + 60
     end
-    local dest = CIV.Zones.byName(C.zones.cargoDestination)
-    if not dest then return t + 60 end
-    local center = { x = dest.center.x,
-                     y = land.getHeight({ x = dest.center.x, y = dest.center.z }),
-                     z = dest.center.z }
-    local volume = { id = world.VolumeType.SPHERE,
-                     params = { point = center, radius = dest.radius } }
-    pcall(world.searchObjects, Object.Category.STATIC, volume, function(obj)
-      local ok, name = pcall(function() return obj:getName() end)
-      if ok and name and not processedObjects[name]
-         and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
-        processedObjects[name] = true
-        local okT, typeName = pcall(function() return obj:getTypeName() end)
-        if CC.airdrop.matchAnyObject or (okT and typeName and matchesType(typeName)) then
-          CIV.dbg("Foreign cargo object in destination zone: " .. tostring(name))
-          local ok2, p = pcall(function() return obj:getPoint() end)
-          if ok2 and p then supplyDelivered(p) end
+    local dests = CIV.Zones.byPrefix(C.zones.cargoDestination)
+    if #dests == 0 then return t + 60 end
+    for _, dest in ipairs(dests) do
+      local center = { x = dest.center.x,
+                       y = land.getHeight({ x = dest.center.x, y = dest.center.z }),
+                       z = dest.center.z }
+      local volume = { id = world.VolumeType.SPHERE,
+                       params = { point = center, radius = dest.radius } }
+      pcall(world.searchObjects, Object.Category.STATIC, volume, function(obj)
+        local ok, name = pcall(function() return obj:getName() end)
+        if ok and name and not processedObjects[name]
+           and string.sub(tostring(name), 1, 6) ~= "CIVIL_" then
+          processedObjects[name] = true
+          local okT, typeName = pcall(function() return obj:getTypeName() end)
+          if CC.airdrop.matchAnyObject or (okT and typeName and matchesType(typeName)) then
+            CIV.dbg("Foreign cargo object in destination zone: " .. tostring(name))
+            local ok2, p = pcall(function() return obj:getPoint() end)
+            if ok2 and p then supplyDelivered(p) end
+          end
         end
-      end
-      return true
-    end)
+        return true
+      end)
+    end
     return t + 5
   end, nil, 12)
 end
