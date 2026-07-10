@@ -243,5 +243,14 @@ mass types, "On Road" behavior, rooftop spawns, official C-130 airdrop
 channels, deck landings, boat/vehicle type names) are listed with their
 fallbacks in `docs/FEASIBILITY.md`.
 
+## Recommended Mods
+
+* [Civilian Assets by Eightball](https://forum.dcs.world/topic/270558-civilian-objects-and-vehicles/)
+* [Copter Life by Eightball](https://forum.dcs.world/topic/386801-copterlife-mod-pack/)
+* [Fire Department Livery Pack](https://forum.dcs.world/topic/254036-fire-department-livery-pack/#comment-5689752)
+* [OV-10A Bronco](https://splitair.gumroad.com/l/fwzxn)
+* [Civil Aircraft Mod](https://cam.em-key.de/)
+
+
 Zone/template scanning, polygon area support and several utilities are
 adapted from the 527th CSAR System by {527th} ienatom and {104WW} Price.
