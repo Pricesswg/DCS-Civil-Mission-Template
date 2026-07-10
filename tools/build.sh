@@ -19,6 +19,7 @@ OUT=dist/CivilMissionTemplate.lua
            Scripts/20_CivilRescue.lua \
            Scripts/30_CivilPolice.lua \
            Scripts/40_CivilTransport.lua \
+           Scripts/45_CivilAviation.lua \
            Scripts/50_CivilCommand.lua; do
     echo ""
     echo "-- ===================================================================="

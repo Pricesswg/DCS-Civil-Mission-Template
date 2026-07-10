@@ -45,6 +45,9 @@ civil swat 7           SWAT objective (announces the operators required)
 civil chase 9          chase from the crossroad nearest to the marker
 civil cargo heavy 9    loading point: tier light/medium/heavy/heavy_lift,
                        then priority
+civil recon 6          corridor anomaly at the marker
+civil vip 7            passenger shuttle, pickup at the pad nearest to
+                       the marker
 ```
 
 What severity means for the players: 3 is a warm-up, 5 is standard, 7

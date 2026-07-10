@@ -21,9 +21,9 @@ trigger with a single `DO SCRIPT FILE` action:
 dist/CivilMissionTemplate.lua
 ```
 
-**B) Modular (for development/testing)**: 5 `DO SCRIPT FILE` actions in
-this order (core first, the others in any order; unused modules can simply
-be omitted):
+**B) Modular (for development/testing)**: one `DO SCRIPT FILE` action per
+file, in this order (core first, the others in any order; unused modules
+can simply be omitted):
 
 ```
 Scripts/01_CivilCore.lua        <- ALWAYS, first
@@ -31,11 +31,12 @@ Scripts/10_CivilFirefighting.lua
 Scripts/20_CivilRescue.lua      (SAR mountain/sea + MedEvac + CASEVAC)
 Scripts/30_CivilPolice.lua      (chase + SWAT)
 Scripts/40_CivilTransport.lua
-Scripts/50_CivilCommand.lua     <- LAST (game-master marker commands)
+Scripts/45_CivilAviation.lua    (recon, VIP shuttle, media coverage)
+Scripts/50_CivilCommand.lua     <- LAST (game-master commands + recap)
 ```
 
 After any change inside `Scripts/`, regenerate the single file with
-`tools/build.sh` (or by manually concatenating the 5 files in order into one
+`tools/build.sh` (or by manually concatenating the files in order into one
 .lua).
 
 ## 3. Trigger zones to create in the ME
@@ -59,6 +60,8 @@ properties are read from `env.mission`.
 | `CIVIL SWAT Base` | team boarding | apron where the helicopter can land |
 | `CIVIL SWAT Point ...` | SWAT scenarios | rooftops / urban LZs (rooftop spawn TO TEST) |
 | `CIVIL Cargo Point ...` | cargo loading points | flat ground |
+| `CIVIL Recon Point ...` | inspection corridor | 5+ zones along a power line or pipeline; anomalies spawn on them |
+| `CIVIL VIP Pad ...` | passenger shuttle pads | at least 2 helipads; pickup and destination drawn from this pool |
 | `CIVIL Cargo Destination` | cargo delivery | single destination zone |
 | `CIVIL Medevac Point ...` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point ...` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
@@ -120,6 +123,8 @@ the event runs anyway.
 | `CIVIL SWAT Team ...` | SWAT squad (ground; unit count scaled at insertion) | `Soldier M4` |
 | `CIVIL Fugitive ...` | fleeing car (vehicle) | `LandRover_ah` |
 | `CIVIL Fire Truck ...` | fire brigade truck (vehicle) | `HEMTT TFFT` |
+| `CIVIL Anomaly ...` | recon anomaly visual (ground) | none, logical anomaly |
+| `CIVIL VIP ...` | waiting passenger visual (ground) | none, logical passenger |
 
 ## 4b. Ships (regular units placed in the ME, matched by name prefix)
 
@@ -219,6 +224,9 @@ mission resumes AUTOMATIC mode by itself after
   retardant on fires, crates = supplies at the destination; until the
   official module's crate type names are validated, `matchAnyObject = true`
   makes the impact location decide).
+- **Aviation tasks**: report a recon anomaly from overhead, list active
+  recon/VIP tasks. Media coverage is passive: hold the filming ring around
+  any event for 5 minutes.
 - **Admin (test)**: manual start of every event, pool status.
 
 ## 9. In-game test checklist (before serious use)

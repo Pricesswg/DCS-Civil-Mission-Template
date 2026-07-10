@@ -18,10 +18,12 @@ Scripts/
                             hospital ships (shared rescue engine)
   30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
   40_CivilTransport.lua     Fixed mass tiers + supply airdrops
-  50_CivilCommand.lua       Command center: game-master marker commands
+  45_CivilAviation.lua      Infrastructure recon, VIP shuttle, media coverage
+  50_CivilCommand.lua       Command center marker commands + session recap
 dist/
   CivilMissionTemplate.lua  Single-file build; regenerate with tools/build.sh
 tools/build.sh              Concatenates Scripts/ into the single-file build
+tools/leaderboard.py        Cross-session leaderboard from dcs.log SCORE lines
 docs/
   CONCEPT.md                Design brief (decisions and verifications)
   FEASIBILITY.md            Point-by-point feasibility check
@@ -66,6 +68,8 @@ whose zones are missing are skipped gracefully: place only what you test.
 | `CIVIL SWAT Point ...` | Police | 3+ | rooftops / urban LZs (rooftop infantry spawn TO TEST) |
 | `CIVIL Cargo Point ...` | Transport | 3+ | loading points on flat ground |
 | `CIVIL Cargo Destination` | Transport | 1 | delivery zone (sling loads and supply airdrops) |
+| `CIVIL Recon Point ...` | Aviation | 5+ | along a power line or pipeline; anomalies spawn on them, patrol the corridor low |
+| `CIVIL VIP Pad ...` | Aviation | 2+ | passenger shuttle helipads (pickup and destination are drawn from this pool) |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -96,6 +100,8 @@ used when absent):**
 | `CIVIL Scene Sea ...` | sea SAR scene, built as a SHIP group | none (scene skipped) |
 | `CIVIL Scene Robbery ...` | chase start scene: police cars, crowd | none (scene skipped) |
 | `CIVIL Scene Standoff ...` | SWAT objective scene: cordon, cars | none (scene skipped) |
+| `CIVIL Anomaly ...` | recon corridor anomaly visual | none (logical anomaly) |
+| `CIVIL VIP ...` | waiting passenger visual | none (logical passenger) |
 
 **Variety through multiple templates**: place as many groups as you want
 with the same prefix and each spawn picks ONE of them at random. For
@@ -125,6 +131,15 @@ objective, cargo pickup, fleeing vehicle) and reports its bearing and
 range. Rescue subjects not yet identified by a spotter get the flare over
 the APPROXIMATE search area, so the intel model stays intact. Per-player
 cooldown, tunable in `nightAssist`.
+
+**Aviation tasks**: infrastructure recon (fly the corridor low, spot the
+anomaly, report it via F10 before it expires), VIP shuttle (board a
+passenger at one pad, deliver to another; ride comfort is the score:
+acceleration spikes cost you the tip) and passive media coverage (hold a
+helicopter in the 1-3 km filming ring around any active event for 5
+minutes and the story airs). A situation recap broadcasts every 30
+minutes, final standings at mission end; `tools/leaderboard.py` turns the
+logged SCORE lines into a cross-session ranking.
 
 **Fire kinds**: each ignition rolls what is burning (`fire.kinds`): a
 forest fire (flames), a landfill fire (thick dark smoke, slow growth) or an

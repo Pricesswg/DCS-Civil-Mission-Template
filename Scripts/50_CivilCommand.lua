@@ -130,6 +130,14 @@ local function cancelNearest(point)
     consider(pt.pt.point, "loading point at " .. pt.pt.name,
       function() CIV.Cargo.cancel(pt) end)
   end
+  for _, anomaly in pairs(CIV.Recon._anomalies) do
+    consider(anomaly.point, "recon anomaly at " .. anomaly.pt.name,
+      function() CIV.Recon.cancel(anomaly) end)
+  end
+  for _, job in pairs(CIV.VIP._jobs) do
+    consider(job.from.point, "VIP shuttle from " .. job.from.name,
+      function() CIV.VIP.cancel(job) end)
+  end
   if best then
     best.fn()
     say("cancelled: " .. best.label .. ".")
@@ -164,6 +172,18 @@ end
 commands.chase = function(args, point)
   if not CIV.Police.startChase({ point = point, severity = toSeverity(args[1]) }) then
     say("chase command failed (no free crossroad in the police pool).")
+  end
+end
+
+commands.recon = function(args, point)
+  if not CIV.Recon.start({ point = point, severity = toSeverity(args[1]) }) then
+    say("recon command failed.")
+  end
+end
+
+commands.vip = function(args, point)
+  if not CIV.VIP.start({ point = point, severity = toSeverity(args[1]) }) then
+    say("vip command failed (needs at least 2 CIVIL VIP Pad zones).")
   end
 end
 
@@ -252,12 +272,72 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip [severity]\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..
     CMD.markerPrefix .. " move <group> [speed] [road]\n" ..
     CMD.markerPrefix .. " cancel  |  " ..
     CMD.markerPrefix .. " director on|off")
+end
+
+----------------------------------------------------------------------
+-- SESSION RECAP
+-- Periodic situation summary for everyone, plus final standings when the
+-- mission ends (also logged as FINAL| lines for tools/leaderboard.py).
+----------------------------------------------------------------------
+
+local function countTable(t)
+  local n = 0
+  for _ in pairs(t) do n = n + 1 end
+  return n
+end
+
+local function topThree()
+  local rows = {}
+  for name, row in pairs(CIV.Score._board) do
+    rows[#rows + 1] = { name = name, points = row.points, tasks = row.tasks }
+  end
+  table.sort(rows, function(a, b) return a.points > b.points end)
+  return rows
+end
+
+if C.recap.enabled then
+  CIV.schedule(function(_, t)
+    local rescueCount = 0
+    for _, sc in pairs(CIV.Rescue._scenarios) do
+      rescueCount = rescueCount + countTable(sc.events)
+    end
+    local txt = string.format(
+      "=== SITUATION RECAP ===\nFires %d | Rescue %d | SWAT %d | Chases %d " ..
+      "| Cargo %d | Recon %d | VIP %d",
+      countTable(CIV.Fire.actives()), rescueCount,
+      countTable(CIV.SWAT._scenarios), countTable(CIV.Police._chases),
+      countTable(CIV.Cargo._points), countTable(CIV.Recon._anomalies),
+      countTable(CIV.VIP._jobs))
+    local rows = topThree()
+    if #rows > 0 then
+      txt = txt .. "\nLeaders:"
+      for i = 1, math.min(3, #rows) do
+        txt = txt .. string.format("  %d. %s %d pts", i, rows[i].name, rows[i].points)
+      end
+    end
+    CIV.msgAll(txt, 20)
+    return t + C.recap.intervalSeconds
+  end, nil, C.recap.intervalSeconds)
+
+  local endHandler = {}
+  function endHandler:onEvent(event)
+    if event.id ~= world.event.S_EVENT_MISSION_END then return end
+    local rows = topThree()
+    local txt = "=== FINAL STANDINGS ===\n"
+    for i, r in ipairs(rows) do
+      txt = txt .. string.format("%d. %s  %d pts (%d tasks)\n", i, r.name, r.points, r.tasks)
+      CIV.log(string.format("FINAL|%s|%d|%d", r.name, r.points, r.tasks))
+      if i >= 10 then break end
+    end
+    if #rows > 0 then CIV.msgAll(txt, 30) end
+  end
+  world.addEventHandler(endHandler)
 end
 
 ----------------------------------------------------------------------

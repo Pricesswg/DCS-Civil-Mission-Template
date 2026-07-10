@@ -66,6 +66,8 @@ CIV.Config = {
     casevacPoints     = "CIVIL Casevac Point",        -- battlefield casualty extraction LZs
     hospitals         = "CIVIL Hospital",             -- hospital pads: delivery is ZONE-based, never S_EVENT_LAND
     vesselSpawn       = "CIVIL Vessel Spawn",         -- harbor zones where stock rescue boats are launched
+    reconPoints       = "CIVIL Recon Point",          -- inspection corridor waypoints (anomalies spawn on them)
+    vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
   },
 
   ------------------------------------------------------------------
@@ -81,6 +83,8 @@ CIV.Config = {
     swatTeam = "CIVIL SWAT Team",  -- ground group: SWAT squad (unit count from template scaled at spawn)
     fugitive = "CIVIL Fugitive",   -- vehicle group: police chase car
     fireTruck= "CIVIL Fire Truck", -- vehicle group: fire brigade truck
+    anomaly  = "CIVIL Anomaly",    -- ground group: recon corridor anomaly (optional visual)
+    vip      = "CIVIL VIP",        -- ground group: waiting passenger (optional visual)
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -131,6 +135,9 @@ CIV.Config = {
       chase       = 15,
       swat        = 20,
       transport   = 10,     -- multiplied by the cargo tier
+      recon       = 12,     -- corridor anomaly found and reported
+      vip         = 10,     -- passenger shuttle, quality = ride comfort
+      media       = 8,      -- live footage of an active event
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -430,8 +437,64 @@ CIV.Config = {
       chase       = 25,
       swat        = 15,
       transport   = 40,
+      recon       = 20,
+      vip         = 20,
       -- fires have their own dedicated scheduler (fire.autoIgnite)
     },
+  },
+
+  ------------------------------------------------------------------
+  -- Aviation tasks: infrastructure recon, VIP shuttle, media coverage
+  ------------------------------------------------------------------
+
+  -- Infrastructure reconnaissance: an anomaly appears on one of the
+  -- corridor waypoints (CIVIL Recon Point zones placed along a power
+  -- line, a pipeline, ...). Players fly the corridor low; within
+  -- hintRadius they get a nudge, overhead and below maxAGL they report
+  -- it via F10. Optional visual from the CIVIL Anomaly template.
+  recon = {
+    maxActive    = 2,
+    severity     = { min = 1, max = 10 },
+    maxAGL       = 300,    -- m, you must be at or below this to spot/report
+    reportRadius = 600,    -- m, horizontal distance for a valid report
+    hintRadius   = 2000,   -- m, "something looks off" nudge
+    ttl          = 2700,   -- s before the anomaly expires unreported
+  },
+
+  -- VIP shuttle: a passenger waits at one CIVIL VIP Pad for a ride to
+  -- another. Boarding and dropoff need boardSeconds landed on the pad.
+  -- Ride comfort IS the score quality: acceleration spikes above
+  -- accelLimit add penalty. Optional waiting figure from CIVIL VIP.
+  vip = {
+    maxActive    = 2,
+    severity     = { min = 1, max = 10 },
+    padRadius    = 60,     -- m from the pad point
+    boardSeconds = 20,     -- s landed and still to board / drop off
+    pickupTtl    = 2700,   -- s before the passenger gives up waiting
+    comfort = {
+      accelLimit    = 3.0,   -- m/s^2 spike threshold (gravity excluded)
+      penaltyPerHit = 0.05,  -- quality lost per sampled spike
+    },
+  },
+
+  -- Media coverage: any player helicopter holding in the filming ring
+  -- around an active event (fire, rescue, SWAT, chase) accumulates
+  -- footage; at filmSeconds the story airs. One award per event.
+  media = {
+    enabled     = true,
+    minDist     = 1000,   -- m, closer than this is unsafe, no footage
+    maxDist     = 3000,   -- m, farther than this the shot is useless
+    minAGL      = 100,    -- m
+    filmSeconds = 300,
+  },
+
+  ------------------------------------------------------------------
+  -- Session recap: periodic situation summary plus final standings at
+  -- mission end (also logged as FINAL| lines for the external parser)
+  ------------------------------------------------------------------
+  recap = {
+    enabled = true,
+    intervalSeconds = 1800,
   },
 
   ------------------------------------------------------------------
@@ -1631,7 +1694,8 @@ CIV.schedule(function()
   local z = CIV.Config.zones
   for _, prefix in pairs({ z.firePoints, z.fireStations, z.waterPoints, z.sarMountainPoints,
       z.sarSeaPoints, z.policePoints, z.swatPoints, z.cargoPoints,
-      z.medevacPoints, z.casevacPoints, z.hospitals, z.vesselSpawn }) do
+      z.medevacPoints, z.casevacPoints, z.hospitals, z.vesselSpawn,
+      z.reconPoints, z.vipPads }) do
     CIV.Pool.load(prefix)
   end
 end, nil, 3)
