@@ -26,6 +26,8 @@ docs/
   CONCEPT.md                Design brief (decisions and verifications)
   FEASIBILITY.md            Point-by-point feasibility check
   ME_SETUP_GUIDE.md         Extended Mission Editor guide
+  PILOT_BRIEFING.txt        Ready-to-paste mission briefing for the players
+  GAME_MASTER_GUIDE.md      Handbook for the command center player
 ```
 
 ## Quick start

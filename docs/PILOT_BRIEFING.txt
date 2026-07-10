@@ -1,0 +1,69 @@
+CIVIL OPERATIONS - PILOT BRIEFING
+(paste this into the Mission Editor briefing panel, trim what you do not use)
+
+SITUATION
+You fly for the regional emergency service. There is no enemy: your
+opponents are time, weather and the terrain. Tasking is generated live
+during the session, either automatically or by the emergency command
+center. Every callout is broadcast with a severity from 1 to 10: severity
+drives how hard the job is and how many points it is worth. You choose
+what to answer: nothing is assigned.
+
+YOUR RADIO MENU
+Everything runs through F10 -> Civil Missions:
+- Session leaderboard: live standings for everyone in the session.
+- Firefighting: start water pickup, drop water, list active fires.
+- Firefighting C-130: load retardant (at the reload apron), start line drop.
+- Rescue: request a signal from the subject, list active rescue events.
+- Police / SWAT: board a SWAT team at the base, check team status.
+- Cargo transport: change the tier of a nearby load, list active pickups.
+- Request illumination on nearest objective: night only, see NIGHT OPS.
+
+TASK TYPES
+WILDFIRE. Fires grow from small to raging (severity 10) and spread. Ground
+crews respond on their own but they are slow: helicopters pick up water
+hovering over a water point, the C-130 reloads retardant on the ground and
+drops it in a line run at 150-250 m AGL, or airdrops retardant drums.
+Forest fires burn bright; a landfill fire is a slow dark smoke column; an
+industrial fire grows fast. The report tells you which one you are facing.
+
+SEARCH AND RESCUE (mountain and sea). A subject is reported with a ROUGH
+position and an approximate search circle on the F10 map. The exact
+position is released only when a spotter airplane flies over the area and
+identifies the subject, so a C-130 on station is worth a lot. Extraction:
+hold a steady hover over the subject; sloppy hovering slows the timer and
+the window is not forever. At sea, rescue vessels also steam toward the
+search area: if you are too slow they may finish the job, and the credit
+goes to the spotter.
+
+MEDEVAC AND BATTLEFIELD CASEVAC. A casualty with a criticality clock.
+High severity means a short clock: check the minutes in the callout before
+you commit. Pick up with a steady hover, then deliver to any hospital pad
+(hold low and still for 15 seconds inside the pad zone) or to the hospital
+ship, which works even while she is underway.
+
+POLICE. Chase: keep your helicopter close to the fleeing vehicle to build
+pressure; lose contact and the pressure decays. At 100 percent the ground
+units make the arrest. High severity fugitives are faster and may run in a
+two-car convoy. SWAT: board a team at the SWAT base (the callout tells you
+how many operators the job needs), then hold a hover over the objective to
+fast-rope them in.
+
+CARGO. Loads come in fixed mass tiers: check the warning when you arrive,
+some loads need a heavy-lift helicopter. You can re-rig a load to another
+tier via F10, it costs a re-rigging delay. Every load has a delivery
+priority and an expiry time: priority 10 pays best and vanishes fastest.
+Sling it to the destination zone. The C-130 can also airdrop supply crates
+into the destination zone.
+
+SIGNALS AND NIGHT OPS
+Ask the subject for a signal when you are within 15 km: orange smoke by
+day, green flares by night. At night you also have one illumination flare
+request every 10 minutes: it ignites over the nearest active objective and
+the message gives you bearing and range. Unidentified rescue subjects only
+get it over the approximate area: bring a spotter.
+
+SCORING
+Points = task value x quality x time x severity. Doing a hard job well and
+fast beats farming easy ones. The leaderboard is live and resets at
+mission end.
