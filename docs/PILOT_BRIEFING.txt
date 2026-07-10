@@ -69,8 +69,10 @@ FIXED-WING PILOTS (Bronco, MB-339, L-39, C-101, Yak-52...): every airplane
 can spot. Orbit a fire region to relay fire positions, overfly a rescue
 search area to identify the subject (that releases the exact coordinates
 to everyone and pays you spotter points). Recon, media and VIP shuttle
-(pads on airfield aprons) are yours too, and light tankers can fly the
-retardant reload + line drop with a reduced drop per pass.
+(pads on airfield aprons) are yours too. On fires you are the AIR ATTACK:
+you do not haul retardant, you get below 600 m near the fire and
+smoke-mark it via F10; for the next 5 minutes every drop on that fire
+scores +25% and you earn the assist if it goes out. Direct the traffic.
 
 SIGNALS AND NIGHT OPS
 Ask the subject for a signal when you are within 15 km: orange smoke by

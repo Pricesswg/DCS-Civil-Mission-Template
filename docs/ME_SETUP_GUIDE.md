@@ -110,6 +110,28 @@ the matching templates:
 | `CIVIL Scene Robbery ...` | chase start | police cars, crowd at the bank |
 | `CIVIL Scene Standoff ...` | SWAT objective | police cordon, parked cars |
 
+**How recon anomalies look**: the anomaly is placed on one of the
+`CIVIL Recon Point` zones and is made of up to three layers: a thin smoke
+column (default on, `recon.smokeVisual`: the smoking transformer you can
+actually see from the corridor), the optional `CIVIL Anomaly` template
+cloned at the point (build it as a maintenance scene: a stopped truck, a
+damaged pylon area, workers), and the proximity nudge message when you fly
+within 2 km below 300 m AGL. Reporting works from overhead (600 m) at low
+level via F10.
+
+**How static areas get their objects**: three layers, pick per zone.
+(1) USER-BUILT: place statics directly in the ME inside the zone (reload
+apron, CASEVAC LZs): nothing to configure, the script never touches them.
+(2) AUTO-DRESS KITS: lists of static objects with offsets from the zone
+center, defined in `CIV.Dressing.kits` in `01_CivilCore.lua` (each entry
+is `{ type = "FARP Tent", dx = 15, dy = 0, heading = 0 }`: type names from
+the ME statics list, offsets in meters). Assign kits to zones with
+`autoDress` (hospitals get the medical camp by default) or add your own
+pairs in `autoDress.custom = { { prefix = "CIVIL Refugee Camp", kit =
+"refugee_camp" } }`. (3) SPAWNED GROUPS: anything that must appear at
+runtime (scenes, subjects, teams) comes from the late-activated `CIVIL ...`
+templates.
+
 The subject signal command works day and night: orange smoke by day, green
 signal flares after dark (`rescue.signal` sets the night hours and the
 flare count). Fires also roll a KIND at ignition (`fire.kinds`): forest,
@@ -240,9 +262,11 @@ mission resumes AUTOMATIC mode by itself after
 - **Aviation tasks**: report a recon anomaly from overhead, list active
   recon/VIP tasks. Media coverage is passive: hold the filming ring around
   any event for 5 minutes (helicopters and airplanes). Every airplane can
-  spot (fires and rescue subjects, with spotter points on identification),
-  fly the retardant line (light types drop less, see `fire.tanker`) and
-  serve VIP pads placed on airfield aprons.
+  spot (fires and rescue subjects, with spotter points on identification)
+  and serve VIP pads placed on airfield aprons. Light air-attack types
+  (see `fire.airAttack`) cannot haul retardant: their job is the smoke
+  mark on the fire, which buffs everyone's drops for 5 minutes and pays
+  them the assist on extinguish.
 - **Admin (test)**: manual start of every event, pool status.
 
 ## 9. In-game test checklist (before serious use)

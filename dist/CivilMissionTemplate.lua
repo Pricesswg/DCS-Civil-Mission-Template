@@ -111,6 +111,10 @@ CIV.Config = {
   autoDress = {
     c130Reload = false,
     hospitals  = true,
+    -- Extra assignments: dress any zone prefix with any kit from
+    -- CIV.Dressing.kits (add your own kits there). Example:
+    --   { prefix = "CIVIL Refugee Camp", kit = "refugee_camp" },
+    custom = {},
   },
 
   ------------------------------------------------------------------
@@ -149,6 +153,7 @@ CIV.Config = {
       vip         = 10,     -- passenger shuttle, quality = ride comfort
       media       = 8,      -- live footage of an active event
       spotter     = 6,      -- rescue subject identified from the air
+      airAttack   = 8,      -- fire marked and extinguished while coordinated
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -258,17 +263,22 @@ CIV.Config = {
                                 -- and just orbiting as a spotter needs no interaction)
     spotterInterval  = 180,     -- s between spotter reports
 
-    -- The retardant flow (ground reload + line drop) works for ANY player
-    -- airplane, not just the C-130. Light air-attack types (OV-10 Bronco
-    -- mod, MB-339, L-39, C-101, ...) drop a reduced amount per second:
-    -- type names are substring-matched, TO VALIDATE against the installed
-    -- modules/mods; unlisted airplanes use defaultMult.
-    tanker = {
-      defaultMult = 1.0,
-      light = {
-        mult = 0.35,
-        types = { "OV-10", "Bronco", "MB-339", "L-39", "C-101",
-                  "Yak-52", "Christen" },
+    -- AIR ATTACK role for the light fixed-wing (OV-10 Bronco mod, MB-339,
+    -- L-39, C-101, Yak-52, Christen Eagle...): they do NOT haul retardant
+    -- (the reload refuses them), they direct the traffic between tankers
+    -- and helicopters. Their F10 command smoke-marks the nearest fire
+    -- (like the real smoke rockets / trail smoke): while the mark is hot,
+    -- every drop on that fire scores a coordination bonus, and the marker
+    -- gets an assist when the fire goes out. Type names are
+    -- substring-matched, TO VALIDATE against the installed mods.
+    airAttack = {
+      types = { "OV-10", "Bronco", "MB-339", "L-39", "C-101",
+                "Yak-52", "Christen" },
+      markRadius = 2500,    -- m, max distance from the fire to mark it
+      maxAGL = 600,         -- m, must be below this to mark
+      coordination = {
+        seconds = 300,      -- how long the mark stays hot
+        dropBonus = 1.25,   -- score multiplier for drops on a marked fire
       },
     },
 
@@ -484,6 +494,9 @@ CIV.Config = {
     reportRadius = 600,    -- m, horizontal distance for a valid report
     hintRadius   = 2000,   -- m, "something looks off" nudge
     ttl          = 2700,   -- s before the anomaly expires unreported
+    smokeVisual  = true,   -- thin smoke column at the anomaly (a smoking
+                           -- transformer / leaking joint), on top of the
+                           -- optional CIVIL Anomaly template
   },
 
   -- VIP shuttle: a passenger waits at one CIVIL VIP Pad for a ride to
@@ -1722,6 +1735,11 @@ CIV.schedule(function()
       CIV.Dressing.spawn(pt.name, "medical_camp")
     end
   end
+  for _, entry in ipairs(CIV.Config.autoDress.custom) do
+    for _, area in ipairs(CIV.Zones.byPrefix(entry.prefix)) do
+      CIV.Dressing.spawn(area.name, entry.kit)
+    end
+  end
 end, nil, 5)
 
 -- theme-area overlays on the F10 map: every zone matching each configured
@@ -1901,6 +1919,12 @@ function Fire.igniteAt(point, severity)
 end
 
 local function extinguish(fire, byWhom)
+  -- air-attack assist: the fire went out while the smoke mark was hot
+  if fire.coordination and timer.getTime() < fire.coordination.untilTime then
+    CIV.Score.award(fire.coordination.playerName, "airAttack",
+      0.8, 0.5, CIV.severityMult(fire.coordination.severity or 5),
+      "air attack coordination")
+  end
   for _, eff in ipairs(fire.effects) do
     trigger.action.effectSmokeStop(eff.name)
   end
@@ -2125,11 +2149,12 @@ local function dropWater(uname)
     CIV.msgUnit(u, "Drop on target!", 10)
     if info then
       -- fire still burning: partial credit; extinguished: full credit.
-      -- Score scales with the severity the fire had when hit.
+      -- Score scales with the severity the fire had when hit, plus the
+      -- coordination bonus while an air-attack mark is hot.
       local preHit = fire.severity + CF.heloDropSeverity
       CIV.Score.award(info.playerName, "fireHelo",
         Fire._fires[fire.id] and 0.5 or 1.0, 0.5,
-        CIV.severityMult(preHit), "firefighting drop")
+        CIV.severityMult(preHit) * coordinationBonus(fire), "firefighting drop")
     end
   else
     CIV.msgUnit(u, "Drop missed: no fire within " .. CF.dropRadius ..
@@ -2183,15 +2208,21 @@ local function isAirplane(info)
   return info.category == Unit.Category.AIRPLANE
 end
 
--- retardant effectiveness per airplane type (light air-attack types drop
--- less per second than the C-130)
-local function tankerMult(typeName)
-  for _, pattern in ipairs(CF.tanker.light.types) do
-    if string.find(typeName or "", pattern, 1, true) then
-      return CF.tanker.light.mult
-    end
+-- light air-attack types direct the traffic and mark fires: they do not
+-- haul retardant
+local function isAirAttackType(typeName)
+  for _, pattern in ipairs(CF.airAttack.types) do
+    if string.find(typeName or "", pattern, 1, true) then return true end
   end
-  return CF.tanker.defaultMult
+  return false
+end
+
+-- coordination bonus while an air-attack smoke mark is hot on the fire
+local function coordinationBonus(fire)
+  if fire.coordination and timer.getTime() < fire.coordination.untilTime then
+    return CF.airAttack.coordination.dropBonus
+  end
+  return 1.0
 end
 
 -- Ground reload, OPT-IN via F10: nothing happens by just parking in the
@@ -2208,6 +2239,13 @@ end
 local function loadRetardant(uname)
   local u = Unit.getByName(uname)
   if not u or not u:isExist() then return end
+  local info = CIV.players[uname]
+  if info and isAirAttackType(info.typeName) then
+    CIV.msgUnit(u, "Your aircraft is an AIR ATTACK platform: it directs " ..
+      "the traffic and smoke-marks the fires (F10), the tankers haul the " ..
+      "retardant.", 12)
+    return
+  end
   local st = cState(uname)
   if st.retardant then
     CIV.msgUnit(u, "Retardant already aboard.", 10)
@@ -2275,6 +2313,7 @@ CIV.schedule(function(_, t)
       local u = Unit.getByName(uname)
       if not u or not u:isExist() or now > st.dropRun.endTime then
         local hits, maxSev = st.dropRun.hits, st.dropRun.maxSev
+        local coordBonus = st.dropRun.coordBonus or 1
         st.dropRun = nil
         if u and u:isExist() then
           local info = CIV.players[uname]
@@ -2282,7 +2321,7 @@ CIV.schedule(function(_, t)
             CIV.msgUnit(u, "Drop complete: effective line.", 10)
             CIV.Score.award(info.playerName, "fireC130",
               math.min(1, hits / CF.c130DropSeconds), 0.5,
-              CIV.severityMult(maxSev), "C-130 retardant line")
+              CIV.severityMult(maxSev) * coordBonus, "C-130 retardant line")
           elseif u then
             CIV.msgUnit(u, "Drop complete: no fire under the line.", 10)
           end
@@ -2292,13 +2331,13 @@ CIV.schedule(function(_, t)
         local agl = CIV.agl(p)
         if agl >= CF.c130DropAGL.min and agl <= CF.c130DropAGL.max then
           local info = CIV.players[uname]
-          local mult = tankerMult(info and info.typeName)
-          local fire = Fire.applyWater(p, CF.c130DropPerSec * mult,
-            info and info.playerName)
+          local fire = Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName)
           if fire then
             st.dropRun.hits = st.dropRun.hits + 1
             st.dropRun.maxSev = math.max(st.dropRun.maxSev,
               fire.severity + CF.c130DropPerSec)
+            st.dropRun.coordBonus = math.max(st.dropRun.coordBonus or 1,
+              coordinationBonus(fire))
           end
         end
       end
@@ -2366,6 +2405,54 @@ if CF.airdrop.enabled then
   end, nil, 10)
 end
 
+----------------------------------------------------------------------
+-- AIR ATTACK SMOKE MARK
+-- The light fixed-wing job: get low near a fire and mark it with red
+-- smoke (the smoke-rocket / trail-smoke pass). While the mark is hot,
+-- drops on that fire score the coordination bonus and the marker earns
+-- the assist when the fire goes out.
+----------------------------------------------------------------------
+
+local function airAttackMark(uname)
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local info = CIV.players[uname]
+  if not info or info.category ~= Unit.Category.AIRPLANE
+     or not isAirAttackType(info.typeName) then
+    CIV.msgUnit(u, "Smoke marking is the air-attack platforms' job " ..
+      "(OV-10, MB-339, L-39, C-101, Yak-52...).", 10)
+    return
+  end
+  local p = u:getPoint()
+  if CIV.agl(p) > CF.airAttack.maxAGL then
+    CIV.msgUnit(u, "Too high to mark: get below " .. CF.airAttack.maxAGL ..
+      " m AGL.", 10)
+    return
+  end
+  local best, bestDist = nil, CF.airAttack.markRadius
+  for _, fire in pairs(Fire._fires) do
+    local d = CIV.dist2D(p, fire.point)
+    if d < bestDist then best, bestDist = fire, d end
+  end
+  if not best then
+    CIV.msgUnit(u, "No active fire within " ..
+      math.floor(CF.airAttack.markRadius / 1000) .. " km.", 10)
+    return
+  end
+  best.coordination = {
+    untilTime = timer.getTime() + CF.airAttack.coordination.seconds,
+    playerName = info.playerName,
+    severity = best.severity,
+  }
+  trigger.action.smoke(CIV.offsetPoint(best.point, math.random(0, 359), 60),
+    trigger.smokeColor.Red)
+  CIV.msgAll("AIR ATTACK " .. info.playerName .. " smoke-marked the " ..
+    best.kindDef.name .. " at " .. best.pt.name .. " (RED smoke). " ..
+    "Coordinated drops for the next " ..
+    math.floor(CF.airAttack.coordination.seconds / 60) .. " minutes score +" ..
+    math.floor((CF.airAttack.coordination.dropBonus - 1) * 100) .. "%.", 15)
+end
+
 -- spotter: any player airplane inside the fire region relays fire intel
 CIV.schedule(function(_, t)
   if #CIV.Zones.byPrefix(C.zones.fireRegion) == 0 then return t + 120 end
@@ -2416,6 +2503,8 @@ CIV.Menu_register(function(gid, uname)
     end
     CIV.msgGroupId(gid, n > 0 and txt or "No active fires.", 20)
   end)
+  missionCommands.addCommandForGroup(gid, "Air attack: smoke-mark nearest fire",
+    heloSub, airAttackMark, uname)
   local c130Sub = missionCommands.addSubMenuForGroup(gid, "Firefighting C-130", CIV.rootMenu[gid])
   missionCommands.addCommandForGroup(gid, "Load retardant (at reload zone)", c130Sub, loadRetardant, uname)
   missionCommands.addCommandForGroup(gid, "Start line drop", c130Sub, startLineDrop, uname)
@@ -3962,6 +4051,12 @@ function RC.start(opts)
     hinted = {},
     gname = CIV.spawnFromTemplate(C.templates.anomaly, pt.point),
   }
+  if CR.smokeVisual then
+    -- thin smoke column: the fault is findable by eye, not only by the
+    -- hint message (effectSmokeBig preset 5 = small smoke, no fire)
+    anomaly.smokeName = "CIVIL_ANOMALY_" .. anomaly.id
+    trigger.action.effectSmokeBig(anomaly.point, 5, 0.4, anomaly.smokeName)
+  end
   RC._anomalies[anomaly.id] = anomaly
   CIV.Pool.occupy(pt)
   CIV.msgAll("INFRASTRUCTURE PATROL (severity " .. sev .. "/10): an anomaly " ..
@@ -3976,6 +4071,7 @@ end
 local function closeAnomaly(anomaly)
   RC._anomalies[anomaly.id] = nil
   CIV.Pool.release(anomaly.pt)
+  if anomaly.smokeName then trigger.action.effectSmokeStop(anomaly.smokeName) end
   if anomaly.gname then CIV.despawnGroup(anomaly.gname) end
 end
 

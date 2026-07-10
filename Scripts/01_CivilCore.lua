@@ -101,6 +101,10 @@ CIV.Config = {
   autoDress = {
     c130Reload = false,
     hospitals  = true,
+    -- Extra assignments: dress any zone prefix with any kit from
+    -- CIV.Dressing.kits (add your own kits there). Example:
+    --   { prefix = "CIVIL Refugee Camp", kit = "refugee_camp" },
+    custom = {},
   },
 
   ------------------------------------------------------------------
@@ -139,6 +143,7 @@ CIV.Config = {
       vip         = 10,     -- passenger shuttle, quality = ride comfort
       media       = 8,      -- live footage of an active event
       spotter     = 6,      -- rescue subject identified from the air
+      airAttack   = 8,      -- fire marked and extinguished while coordinated
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -248,17 +253,22 @@ CIV.Config = {
                                 -- and just orbiting as a spotter needs no interaction)
     spotterInterval  = 180,     -- s between spotter reports
 
-    -- The retardant flow (ground reload + line drop) works for ANY player
-    -- airplane, not just the C-130. Light air-attack types (OV-10 Bronco
-    -- mod, MB-339, L-39, C-101, ...) drop a reduced amount per second:
-    -- type names are substring-matched, TO VALIDATE against the installed
-    -- modules/mods; unlisted airplanes use defaultMult.
-    tanker = {
-      defaultMult = 1.0,
-      light = {
-        mult = 0.35,
-        types = { "OV-10", "Bronco", "MB-339", "L-39", "C-101",
-                  "Yak-52", "Christen" },
+    -- AIR ATTACK role for the light fixed-wing (OV-10 Bronco mod, MB-339,
+    -- L-39, C-101, Yak-52, Christen Eagle...): they do NOT haul retardant
+    -- (the reload refuses them), they direct the traffic between tankers
+    -- and helicopters. Their F10 command smoke-marks the nearest fire
+    -- (like the real smoke rockets / trail smoke): while the mark is hot,
+    -- every drop on that fire scores a coordination bonus, and the marker
+    -- gets an assist when the fire goes out. Type names are
+    -- substring-matched, TO VALIDATE against the installed mods.
+    airAttack = {
+      types = { "OV-10", "Bronco", "MB-339", "L-39", "C-101",
+                "Yak-52", "Christen" },
+      markRadius = 2500,    -- m, max distance from the fire to mark it
+      maxAGL = 600,         -- m, must be below this to mark
+      coordination = {
+        seconds = 300,      -- how long the mark stays hot
+        dropBonus = 1.25,   -- score multiplier for drops on a marked fire
       },
     },
 
@@ -474,6 +484,9 @@ CIV.Config = {
     reportRadius = 600,    -- m, horizontal distance for a valid report
     hintRadius   = 2000,   -- m, "something looks off" nudge
     ttl          = 2700,   -- s before the anomaly expires unreported
+    smokeVisual  = true,   -- thin smoke column at the anomaly (a smoking
+                           -- transformer / leaking joint), on top of the
+                           -- optional CIVIL Anomaly template
   },
 
   -- VIP shuttle: a passenger waits at one CIVIL VIP Pad for a ride to
@@ -1710,6 +1723,11 @@ CIV.schedule(function()
   if CIV.Config.autoDress.hospitals then
     for _, pt in ipairs(CIV.Pool.load(CIV.Config.zones.hospitals)) do
       CIV.Dressing.spawn(pt.name, "medical_camp")
+    end
+  end
+  for _, entry in ipairs(CIV.Config.autoDress.custom) do
+    for _, area in ipairs(CIV.Zones.byPrefix(entry.prefix)) do
+      CIV.Dressing.spawn(area.name, entry.kit)
     end
   end
 end, nil, 5)

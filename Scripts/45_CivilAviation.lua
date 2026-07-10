@@ -58,6 +58,12 @@ function RC.start(opts)
     hinted = {},
     gname = CIV.spawnFromTemplate(C.templates.anomaly, pt.point),
   }
+  if CR.smokeVisual then
+    -- thin smoke column: the fault is findable by eye, not only by the
+    -- hint message (effectSmokeBig preset 5 = small smoke, no fire)
+    anomaly.smokeName = "CIVIL_ANOMALY_" .. anomaly.id
+    trigger.action.effectSmokeBig(anomaly.point, 5, 0.4, anomaly.smokeName)
+  end
   RC._anomalies[anomaly.id] = anomaly
   CIV.Pool.occupy(pt)
   CIV.msgAll("INFRASTRUCTURE PATROL (severity " .. sev .. "/10): an anomaly " ..
@@ -72,6 +78,7 @@ end
 local function closeAnomaly(anomaly)
   RC._anomalies[anomaly.id] = nil
   CIV.Pool.release(anomaly.pt)
+  if anomaly.smokeName then trigger.action.effectSmokeStop(anomaly.smokeName) end
   if anomaly.gname then CIV.despawnGroup(anomaly.gname) end
 end
 
