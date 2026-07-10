@@ -453,7 +453,7 @@ CIV.Config = {
   ------------------------------------------------------------------
   nightAssist = {
     enabled = true,
-    cooldownSeconds = 120,
+    cooldownSeconds = 600,  -- 10 minutes between requests per player
     searchRadius = 30000,   -- m, nearest objective within this range
     heightAGL = 300,        -- m, illumination flare ignition height
     power = 1000000,        -- illumination power (older builds ignore it)
