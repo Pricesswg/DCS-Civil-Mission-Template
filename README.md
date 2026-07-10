@@ -117,6 +117,13 @@ used when absent):**
 | `CIVIL Anomaly ...` | recon corridor anomaly visual | none (logical anomaly) |
 | `CIVIL VIP ...` | waiting passenger visual | none (logical passenger) |
 
+**Building a template**: create a group of the right category (ground or
+ship), name the GROUP with the prefix, tick LATE ACTIVATION, place it
+anywhere (position is irrelevant: the clone is re-centered on the event
+point, keeping the relative layout and each unit's heading, types,
+liveries and skill). No zone needed. `dcs.log` lists every template found
+at mission start. Full step-by-step recipe in `docs/ME_SETUP_GUIDE.md`.
+
 **Variety through multiple templates**: place as many groups as you want
 with the same prefix and each spawn picks ONE of them at random. For
 example `CIVIL Boat 1`, `CIVIL Boat 2`, `CIVIL Boat 3` (or `CIVIL Fugitive

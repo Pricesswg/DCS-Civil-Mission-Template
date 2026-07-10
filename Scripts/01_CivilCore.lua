@@ -905,6 +905,9 @@ local function loadTemplates()
     end
   end
   CIV.log("Mission scanner: " .. #CIV.Templates._groups .. " late-activated templates loaded")
+  for _, tpl in ipairs(CIV.Templates._groups) do
+    CIV.log("  template: '" .. tpl.name .. "' (" .. tpl.category .. ")")
+  end
 end
 
 loadTriggerZones()

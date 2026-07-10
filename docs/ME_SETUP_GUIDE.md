@@ -89,6 +89,39 @@ Prefixes are configurable in `CIV.Config.zones` (top of `01_CivilCore.lua`).
 from them (units, liveries, country) instead of using the hardcoded fallback
 types. Group-name prefix matching.
 
+### How to build a template, step by step
+
+The same recipe works for EVERY template in the tables below (anomaly,
+scenes, survivor, fugitive, boats, SWAT team, VIP, fire truck):
+
+1. In the ME, create a group of the right category: GROUND for survivors,
+   scenes, teams, cars, trucks, anomalies and the VIP; SHIP for the sea
+   SAR boat, the rescue boat and the sea scene. A ground group can mix
+   vehicles and infantry in the same group.
+2. Rename the GROUP so its name starts with the prefix, e.g.
+   `CIVIL Anomaly Transformer Truck`. Only the group name matters, unit
+   names are free.
+3. Tick **LATE ACTIVATION**. The group will never activate on its own and
+   costs nothing while unused: it is pure spawn data.
+4. Place it ANYWHERE: no zone needed, the position is irrelevant. At spawn
+   the group is cloned and re-centered on the event point. A tidy
+   convention is a "template farm": park all templates together in an
+   unused corner of the map.
+5. Arrange the units exactly as you want them to appear: the layout
+   RELATIVE to the first unit is preserved (ambulance here, two medics
+   three meters away), and each unit keeps its own heading as you set it.
+   Types, liveries, skill and country are cloned too.
+6. Waypoints/routes are ignored: the clone gets a hold point where it
+   spawns.
+7. Verify at mission start: `dcs.log` lists every template found, one
+   `[CIVIL]   template: '...'` line each. If yours is missing, the group
+   name prefix is wrong or late activation is not ticked.
+
+Notes: the SWAT team template is special, its unit count is scaled to the
+squad size at insertion (the first unit is duplicated if needed). Pure
+STATIC objects cannot be late-activated groups: for statics use the
+dressing kits or direct ME placement (see below).
+
 For variety, place SEVERAL templates with the same prefix (`CIVIL Boat 1`,
 `CIVIL Boat 2`, ... or any suffix, numbers are optional): every spawn picks
 one of the matching templates at random. Useful to rotate boat types, car
