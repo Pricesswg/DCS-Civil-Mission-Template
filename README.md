@@ -4,7 +4,7 @@ Modular template for civil missions in DCS World: firefighting, mountain/sea
 SAR, MedEvac, battlefield CASEVAC, police (chase and SWAT), tiered cargo
 transport. All in **pure native Lua** (no MIST/MOOSE/CTLD).
 
-![DCS Civil Mission Template](cover.png)
+![DCS Civil Mission Template](cover.jpg)
 
 
 ## Repository layout
