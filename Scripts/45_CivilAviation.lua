@@ -11,10 +11,12 @@
 --   VIP SHUTTLE: a passenger waits at one "CIVIL VIP Pad" for a ride to
 --   another. Board and drop off by holding landed on the pad. Ride
 --   comfort IS the score quality: acceleration spikes eat it away.
+--   Helicopters AND airplanes: put pads on airfield aprons and the light
+--   trainers (Yak-52, MB-339, L-39, C-101...) get an air-taxi job.
 --
---   MEDIA: any player helicopter holding in the filming ring around an
---   active event accumulates footage; when the story airs the pilot is
---   credited. One award per event, passive, no menu needed.
+--   MEDIA: any player helicopter or airplane holding in the filming ring
+--   around an active event accumulates footage; when the story airs the
+--   pilot is credited. One award per event, passive, no menu needed.
 ----------------------------------------------------------------------
 
 assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
@@ -219,7 +221,11 @@ CIV.schedule(function(_, t)
           " gave up waiting. Task expired.", 12)
         closeJob(job)
       else
-        CIV.forEachPlayerHelo(function(u, info)
+        -- helicopters and airplanes: place VIP pads on airfield aprons to
+        -- give the light trainers an air-taxi job
+        CIV.forEachPlayer(function(u, info)
+          if info.category ~= Unit.Category.HELICOPTER
+             and info.category ~= Unit.Category.AIRPLANE then return end
           if job.state ~= "waiting" then return end
           if landedOnPad(u, job.from) then
             job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
@@ -332,7 +338,10 @@ if CM.enabled then
   CIV.schedule(function(_, t)
     local events = filmableEvents()
     if #events > 0 then
-      CIV.forEachPlayerHelo(function(u, info)
+      -- helicopters AND airplanes: a trainer orbiting the ring films too
+      CIV.forEachPlayer(function(u, info)
+        if info.category ~= Unit.Category.HELICOPTER
+           and info.category ~= Unit.Category.AIRPLANE then return end
         local p = u:getPoint()
         if CIV.agl(p) < CM.minAGL then return end
         for _, evt in ipairs(events) do

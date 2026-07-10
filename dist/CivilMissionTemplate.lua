@@ -148,6 +148,7 @@ CIV.Config = {
       recon       = 12,     -- corridor anomaly found and reported
       vip         = 10,     -- passenger shuttle, quality = ride comfort
       media       = 8,      -- live footage of an active event
+      spotter     = 6,      -- rescue subject identified from the air
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -256,6 +257,20 @@ CIV.Config = {
                                 -- the load via F10 (loading is opt-in: taking off clean
                                 -- and just orbiting as a spotter needs no interaction)
     spotterInterval  = 180,     -- s between spotter reports
+
+    -- The retardant flow (ground reload + line drop) works for ANY player
+    -- airplane, not just the C-130. Light air-attack types (OV-10 Bronco
+    -- mod, MB-339, L-39, C-101, ...) drop a reduced amount per second:
+    -- type names are substring-matched, TO VALIDATE against the installed
+    -- modules/mods; unlisted airplanes use defaultMult.
+    tanker = {
+      defaultMult = 1.0,
+      light = {
+        mult = 0.35,
+        types = { "OV-10", "Bronco", "MB-339", "L-39", "C-101",
+                  "Yak-52", "Christen" },
+      },
+    },
 
     -- Physical retardant airdrop (official C-130 module). See the generic
     -- airdrop notes in CIV.Airdrop below: drops are detected from outside
@@ -2168,6 +2183,17 @@ local function isAirplane(info)
   return info.category == Unit.Category.AIRPLANE
 end
 
+-- retardant effectiveness per airplane type (light air-attack types drop
+-- less per second than the C-130)
+local function tankerMult(typeName)
+  for _, pattern in ipairs(CF.tanker.light.types) do
+    if string.find(typeName or "", pattern, 1, true) then
+      return CF.tanker.light.mult
+    end
+  end
+  return CF.tanker.defaultMult
+end
+
 -- Ground reload, OPT-IN via F10: nothing happens by just parking in the
 -- reload zone, so a C-130 that only wants to orbit as spotter/rescue
 -- support takes off clean with no interaction. Requesting the load starts
@@ -2266,7 +2292,9 @@ CIV.schedule(function(_, t)
         local agl = CIV.agl(p)
         if agl >= CF.c130DropAGL.min and agl <= CF.c130DropAGL.max then
           local info = CIV.players[uname]
-          local fire = Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName)
+          local mult = tankerMult(info and info.typeName)
+          local fire = Fire.applyWater(p, CF.c130DropPerSec * mult,
+            info and info.playerName)
           if fire then
             st.dropRun.hits = st.dropRun.hits + 1
             st.dropRun.maxSev = math.max(st.dropRun.maxSev,
@@ -2973,6 +3001,9 @@ CIV.schedule(function(_, t)
           evt.spotterName = spotter.playerName   -- credited on a sea rescue
           evt.markId = CIV.mark(sc.def.label .. " #" .. evt.id, evt.point)
           retaskVessels(evt, evt.point)   -- vessels steer to the exact position
+          CIV.Score.award(spotter.playerName, "spotter", 0.7, 0.5,
+            CIV.severityMult(evt.severity),
+            sc.def.label .. " #" .. evt.id .. " identified")
           CIV.msgAll("SPOTTER " .. spotter.playerName .. " has identified the " ..
             sc.def.label .. " #" .. evt.id .. " subject:\n" ..
             CIV.coordText(evt.point) .. "\nExact position marked on the F10 map.", 20)
@@ -3884,10 +3915,12 @@ CIV.log("CivilTransport loaded")
 --   VIP SHUTTLE: a passenger waits at one "CIVIL VIP Pad" for a ride to
 --   another. Board and drop off by holding landed on the pad. Ride
 --   comfort IS the score quality: acceleration spikes eat it away.
+--   Helicopters AND airplanes: put pads on airfield aprons and the light
+--   trainers (Yak-52, MB-339, L-39, C-101...) get an air-taxi job.
 --
---   MEDIA: any player helicopter holding in the filming ring around an
---   active event accumulates footage; when the story airs the pilot is
---   credited. One award per event, passive, no menu needed.
+--   MEDIA: any player helicopter or airplane holding in the filming ring
+--   around an active event accumulates footage; when the story airs the
+--   pilot is credited. One award per event, passive, no menu needed.
 ----------------------------------------------------------------------
 
 assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
@@ -4092,7 +4125,11 @@ CIV.schedule(function(_, t)
           " gave up waiting. Task expired.", 12)
         closeJob(job)
       else
-        CIV.forEachPlayerHelo(function(u, info)
+        -- helicopters and airplanes: place VIP pads on airfield aprons to
+        -- give the light trainers an air-taxi job
+        CIV.forEachPlayer(function(u, info)
+          if info.category ~= Unit.Category.HELICOPTER
+             and info.category ~= Unit.Category.AIRPLANE then return end
           if job.state ~= "waiting" then return end
           if landedOnPad(u, job.from) then
             job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
@@ -4205,7 +4242,10 @@ if CM.enabled then
   CIV.schedule(function(_, t)
     local events = filmableEvents()
     if #events > 0 then
-      CIV.forEachPlayerHelo(function(u, info)
+      -- helicopters AND airplanes: a trainer orbiting the ring films too
+      CIV.forEachPlayer(function(u, info)
+        if info.category ~= Unit.Category.HELICOPTER
+           and info.category ~= Unit.Category.AIRPLANE then return end
         local p = u:getPoint()
         if CIV.agl(p) < CM.minAGL then return end
         for _, evt in ipairs(events) do

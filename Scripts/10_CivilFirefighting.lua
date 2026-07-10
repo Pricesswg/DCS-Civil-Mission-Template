@@ -424,6 +424,17 @@ local function isAirplane(info)
   return info.category == Unit.Category.AIRPLANE
 end
 
+-- retardant effectiveness per airplane type (light air-attack types drop
+-- less per second than the C-130)
+local function tankerMult(typeName)
+  for _, pattern in ipairs(CF.tanker.light.types) do
+    if string.find(typeName or "", pattern, 1, true) then
+      return CF.tanker.light.mult
+    end
+  end
+  return CF.tanker.defaultMult
+end
+
 -- Ground reload, OPT-IN via F10: nothing happens by just parking in the
 -- reload zone, so a C-130 that only wants to orbit as spotter/rescue
 -- support takes off clean with no interaction. Requesting the load starts
@@ -522,7 +533,9 @@ CIV.schedule(function(_, t)
         local agl = CIV.agl(p)
         if agl >= CF.c130DropAGL.min and agl <= CF.c130DropAGL.max then
           local info = CIV.players[uname]
-          local fire = Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName)
+          local mult = tankerMult(info and info.typeName)
+          local fire = Fire.applyWater(p, CF.c130DropPerSec * mult,
+            info and info.playerName)
           if fire then
             st.dropRun.hits = st.dropRun.hits + 1
             st.dropRun.maxSev = math.max(st.dropRun.maxSev,

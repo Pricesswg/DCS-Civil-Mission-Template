@@ -62,8 +62,15 @@ low (below 300 m AGL), watch for the nudge message, then report it from
 overhead via F10 -> Aviation tasks. VIP shuttle: board the passenger at
 the announced pad (land and hold 20 seconds), fly them to the destination
 pad; every hard maneuver costs comfort, and comfort is your score. Media:
-hold any helicopter 1-3 km from an active event, above 100 m, for 5
-minutes and your footage airs for points.
+hold 1-3 km from an active event, above 100 m, for 5 minutes and your
+footage airs for points.
+
+FIXED-WING PILOTS (Bronco, MB-339, L-39, C-101, Yak-52...): every airplane
+can spot. Orbit a fire region to relay fire positions, overfly a rescue
+search area to identify the subject (that releases the exact coordinates
+to everyone and pays you spotter points). Recon, media and VIP shuttle
+(pads on airfield aprons) are yours too, and light tankers can fly the
+retardant reload + line drop with a reduced drop per pass.
 
 SIGNALS AND NIGHT OPS
 Ask the subject for a signal when you are within 15 km: orange smoke by

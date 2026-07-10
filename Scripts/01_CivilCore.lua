@@ -138,6 +138,7 @@ CIV.Config = {
       recon       = 12,     -- corridor anomaly found and reported
       vip         = 10,     -- passenger shuttle, quality = ride comfort
       media       = 8,      -- live footage of an active event
+      spotter     = 6,      -- rescue subject identified from the air
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -246,6 +247,20 @@ CIV.Config = {
                                 -- the load via F10 (loading is opt-in: taking off clean
                                 -- and just orbiting as a spotter needs no interaction)
     spotterInterval  = 180,     -- s between spotter reports
+
+    -- The retardant flow (ground reload + line drop) works for ANY player
+    -- airplane, not just the C-130. Light air-attack types (OV-10 Bronco
+    -- mod, MB-339, L-39, C-101, ...) drop a reduced amount per second:
+    -- type names are substring-matched, TO VALIDATE against the installed
+    -- modules/mods; unlisted airplanes use defaultMult.
+    tanker = {
+      defaultMult = 1.0,
+      light = {
+        mult = 0.35,
+        types = { "OV-10", "Bronco", "MB-339", "L-39", "C-101",
+                  "Yak-52", "Christen" },
+      },
+    },
 
     -- Physical retardant airdrop (official C-130 module). See the generic
     -- airdrop notes in CIV.Airdrop below: drops are detected from outside

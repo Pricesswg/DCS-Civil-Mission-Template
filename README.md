@@ -149,9 +149,17 @@ cooldown, tunable in `nightAssist`.
 **Aviation tasks**: infrastructure recon (fly the corridor low, spot the
 anomaly, report it via F10 before it expires), VIP shuttle (board a
 passenger at one pad, deliver to another; ride comfort is the score:
-acceleration spikes cost you the tip) and passive media coverage (hold a
-helicopter in the 1-3 km filming ring around any active event for 5
-minutes and the story airs). A situation recap broadcasts every 30
+acceleration spikes cost you the tip) and passive media coverage (hold in
+the 1-3 km filming ring around any active event for 5 minutes and the
+story airs).
+
+**Light fixed-wing (Bronco, MB-339, L-39, C-101, Yak-52, Christen
+Eagle...)** have a full job list: spotting works from ANY airplane (fire
+intel relay plus rescue identification, which now pays spotter points),
+the recon corridor and the media ring suit them natively, VIP pads placed
+on airfield aprons give them an air-taxi role, and the retardant flow
+(reload + line drop) accepts any airplane with a reduced drop rate for
+light types (`fire.tanker`, type names TO VALIDATE per mod). A situation recap broadcasts every 30
 minutes, final standings at mission end; `tools/leaderboard.py` turns the
 logged SCORE lines into a cross-session ranking.
 

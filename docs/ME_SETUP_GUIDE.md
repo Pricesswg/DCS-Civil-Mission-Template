@@ -239,7 +239,10 @@ mission resumes AUTOMATIC mode by itself after
   makes the impact location decide).
 - **Aviation tasks**: report a recon anomaly from overhead, list active
   recon/VIP tasks. Media coverage is passive: hold the filming ring around
-  any event for 5 minutes.
+  any event for 5 minutes (helicopters and airplanes). Every airplane can
+  spot (fires and rescue subjects, with spotter points on identification),
+  fly the retardant line (light types drop less, see `fire.tanker`) and
+  serve VIP pads placed on airfield aprons.
 - **Admin (test)**: manual start of every event, pool status.
 
 ## 9. In-game test checklist (before serious use)

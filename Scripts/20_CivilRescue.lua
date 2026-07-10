@@ -565,6 +565,9 @@ CIV.schedule(function(_, t)
           evt.spotterName = spotter.playerName   -- credited on a sea rescue
           evt.markId = CIV.mark(sc.def.label .. " #" .. evt.id, evt.point)
           retaskVessels(evt, evt.point)   -- vessels steer to the exact position
+          CIV.Score.award(spotter.playerName, "spotter", 0.7, 0.5,
+            CIV.severityMult(evt.severity),
+            sc.def.label .. " #" .. evt.id .. " identified")
           CIV.msgAll("SPOTTER " .. spotter.playerName .. " has identified the " ..
             sc.def.label .. " #" .. evt.id .. " subject:\n" ..
             CIV.coordText(evt.point) .. "\nExact position marked on the F10 map.", 20)
