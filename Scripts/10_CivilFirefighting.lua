@@ -42,6 +42,11 @@ CIV.Fire = { _fires = {}, _fid = 0 }
 local Fire = CIV.Fire
 local SEV = CF.severity
 local dispatchFireTrucks, releaseFireTrucks   -- defined in the brigade section
+local coordinationBonus                       -- defined in the C-130 section
+
+-- FIREWATCH state: region zone name -> { time, playerName } of the last
+-- patrol pass while the region had no active fire (see the patrol loop)
+local regionPatrols = {}
 
 -- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL, 5..8 = thick smoke
 -- only (used by smokeOnly fire kinds such as a landfill fire)
@@ -109,6 +114,18 @@ function Fire.ignite(pt, severityOverride)
     smokeName = "CIVIL_FIRE_" .. Fire._fid,
     effects = {}, markId = nil,
   }
+  local region = CIV.Zones.containing(C.zones.fireRegion, fire.point)
+  fire.regionName = region and region.name
+  -- FIREWATCH early detection: a recent patrol pass over this region means
+  -- the fire is called in before it takes hold. GM-commanded severities are
+  -- deliberate and stay untouched.
+  if not severityOverride and CF.firewatch.enabled and fire.regionName then
+    local patrol = regionPatrols[fire.regionName]
+    if patrol and timer.getTime() - patrol.time <= CF.firewatch.window then
+      fire.severity = math.max(1, fire.severity - CF.firewatch.severityCut)
+      fire.earlyBy = patrol.playerName
+    end
+  end
   fire.nextGrow = timer.getTime() + fire.growEvery
   refreshVisuals(fire)
   Fire._fires[fire.id] = fire
@@ -120,6 +137,12 @@ function Fire.ignite(pt, severityOverride)
     "\nFire zone highlighted on the F10 map.", 20)
   CIV.log("Fire #" .. fire.id .. " (" .. kindDef.name .. ") ignited at " ..
     pt.name .. " severity " .. fire.severity)
+  if fire.earlyBy then
+    CIV.msgAll("FIREWATCH: the patrol flown by " .. fire.earlyBy ..
+      " called this fire in early. The response starts ahead of the growth.", 15)
+    CIV.Score.award(fire.earlyBy, "firewatch", 0.8, 0.5,
+      CIV.severityMult(fire.severity), "firewatch early detection")
+  end
   dispatchFireTrucks(fire)
   return fire
 end
@@ -213,6 +236,9 @@ end, nil, 15)
 ----------------------------------------------------------------------
 
 local function truckRoute(brigade, fromPoint, firePoint)
+  -- the fire may have been extinguished or called off between the dispatch
+  -- and this delayed call: the brigade is already released then
+  if not brigade then return end
   local g = Group.getByName(brigade.gname)
   if not g then return end
   pcall(function()
@@ -441,7 +467,9 @@ local function isAirAttackType(typeName)
 end
 
 -- coordination bonus while an air-attack smoke mark is hot on the fire
-local function coordinationBonus(fire)
+-- (forward-declared at the top: the water drop handlers run before this
+-- section is reached lexically)
+coordinationBonus = function(fire)
   if fire.coordination and timer.getTime() < fire.coordination.untilTime then
     return CF.airAttack.coordination.dropBonus
   end
@@ -705,6 +733,27 @@ CIV.schedule(function(_, t)
   end
   return t + CF.spotterInterval
 end, nil, 30)
+
+-- FIREWATCH patrol tracking: an airplane sweeping a fire region that has
+-- no active fire keeps it watched for firewatch.window seconds. Burning
+-- regions do not count as patrol (fight the fire, or spot it: both are
+-- already rewarded).
+if CF.firewatch.enabled then
+  CIV.schedule(function(_, t)
+    if #CIV.Zones.byPrefix(C.zones.fireRegion) == 0 then return t + 120 end
+    CIV.forEachPlayer(function(u, info)
+      if not isAirplane(info) or not u:inAir() then return end
+      local region = CIV.Zones.containing(C.zones.fireRegion, u:getPoint())
+      if not region then return end
+      for _, fire in pairs(Fire._fires) do
+        if fire.regionName == region.name then return end
+      end
+      regionPatrols[region.name] = { time = timer.getTime(),
+                                     playerName = info.playerName }
+    end)
+    return t + 30
+  end, nil, 25)
+end
 
 ----------------------------------------------------------------------
 -- F10 MENUS + EVENT STARTER

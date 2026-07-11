@@ -65,6 +65,18 @@ pad; every hard maneuver costs comfort, and comfort is your score. Media:
 hold 1-3 km from an active event, above 100 m, for 5 minutes and your
 footage airs for points.
 
+MEDICAL TRANSFER. Sometimes a delivered patient must continue to a
+regional hospital far away: a transfer job spawns at the pad nearest the
+delivery. Same boarding as the VIP shuttle, but the clock is a criticality
+deadline and the passenger is on a stretcher: fly fast AND smooth. The
+long leg and the apron pads make this the air ambulance job for the
+fixed-wing.
+
+SKYDIVE. Over a drop zone, above 800 m AGL, release the jumpers via
+F10 -> Aviation tasks. They drift with the real wind in freefall and under
+canopy: your score is how close they land to the center, so read the wind
+and pick your release point upwind.
+
 FIXED-WING PILOTS (Bronco, MB-339, L-39, C-101, Yak-52...): every airplane
 can spot. Orbit a fire region to relay fire positions, overfly a rescue
 search area to identify the subject (that releases the exact coordinates
@@ -73,6 +85,11 @@ to everyone and pays you spotter points). Recon, media and VIP shuttle
 you do not haul retardant, you get below 600 m near the fire and
 smoke-mark it via F10; for the next 5 minutes every drop on that fire
 scores +25% and you earn the assist if it goes out. Direct the traffic.
+Quiet stretch? Sweep a fire region with no fire burning: the region stays
+watched for 15 minutes and a fire igniting there is called in early,
+smaller, with credit to you. On a police chase, orbit over the fugitive
+below 1500 m: the helicopter's pressure builds 50% faster and the arrest
+pays you an assist.
 
 SIGNALS AND NIGHT OPS
 Ask the subject for a signal when you are within 15 km: orange smoke by

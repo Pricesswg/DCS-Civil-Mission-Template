@@ -94,6 +94,15 @@ These match the concept's list; each item ships with an escape route.
    Worst case (drops not visible to scripting at all) the F10 line-drop
    flow still covers the C-130 firefighting role entirely.
 
+**Aviation additions (v0.3)**: the medical transfer, traffic watch and
+firewatch mechanics reuse already-listed primitives (pad boarding, player
+position polling, zone containment), so they add no new API risk. The
+skydive drop uses `atmosphere.getWind` to compute the drift: the call is
+standard scripting API, but verify on the chosen map that the returned
+vector matches the mission weather (some weather presets report calm winds
+at low altitude); with zero wind the jumpers simply land where released,
+which still plays fine.
+
 ## Corrections / clarifications vs the concept
 
 - **`world.setPersistenceHandler`**: I found NO evidence this exists as a

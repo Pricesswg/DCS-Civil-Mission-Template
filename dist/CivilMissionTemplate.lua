@@ -78,6 +78,7 @@ CIV.Config = {
     vesselSpawn       = "CIVIL Vessel Spawn",         -- harbor zones where stock rescue boats are launched
     reconPoints       = "CIVIL Recon Point",          -- inspection corridor waypoints (anomalies spawn on them)
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
+    dropZones         = "CIVIL Drop Zone",            -- skydive drop zones (score = distance from center)
   },
 
   ------------------------------------------------------------------
@@ -95,6 +96,7 @@ CIV.Config = {
     fireTruck= "CIVIL Fire Truck", -- vehicle group: fire brigade truck
     anomaly  = "CIVIL Anomaly",    -- ground group: recon corridor anomaly (optional visual)
     vip      = "CIVIL VIP",        -- ground group: waiting passenger (optional visual)
+    skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -103,6 +105,7 @@ CIV.Config = {
     swat       = "Soldier M4",
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
     fireTruck  = "HEMTT TFFT",     -- stock airfield fire truck, TO VALIDATE
+    skydiver   = "Soldier M4",
   },
 
   -- Automatic scenery dressing of fixed zones. The C-130 reload and the
@@ -154,6 +157,10 @@ CIV.Config = {
       media       = 8,      -- live footage of an active event
       spotter     = 6,      -- rescue subject identified from the air
       airAttack   = 8,      -- fire marked and extinguished while coordinated
+      medTransfer = 14,     -- long-range air ambulance leg after a hospital delivery
+      trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
+      firewatch   = 5,      -- fire spotted early by a preventive patrol
+      skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -280,6 +287,18 @@ CIV.Config = {
         seconds = 300,      -- how long the mark stays hot
         dropBonus = 1.25,   -- score multiplier for drops on a marked fire
       },
+    },
+
+    -- FIREWATCH preventive patrol: an airplane sweeping a fire region while
+    -- no fire burns there keeps that region "watched". A fire igniting in a
+    -- watched region is called in early: it starts smaller (severityCut off
+    -- the initial roll) and the patrolling pilot is credited. Rewards flying
+    -- the quiet stretches of the session, not only chasing the callouts.
+    -- GM-commanded fires ("civil fire 7") keep their commanded severity.
+    firewatch = {
+      enabled     = true,
+      window      = 900,   -- s a patrol pass keeps the region watched
+      severityCut = 2,     -- severity removed from the initial roll
     },
 
     -- Physical retardant airdrop (official C-130 module). See the generic
@@ -446,6 +465,18 @@ CIV.Config = {
     routeHops      = 3,     -- waypoints generated ahead (local random walk)
     neighborRadius = 1500,  -- m, "nearby points" for the random walk
     sceneTemplates = { "CIVIL Scene Robbery" },  -- scene at the chase start crossroad (optional)
+
+    -- TRAFFIC WATCH: the fixed-wing job on a chase, mirroring the air
+    -- attack role on fires. An airplane orbiting over the fugitive (within
+    -- radius, below maxAGL) keeps the pursuit on camera: while it holds
+    -- contact the helicopter's pressure builds rateBonus times faster, and
+    -- the watcher earns an assist when the arrest lands.
+    trafficWatch = {
+      enabled   = true,
+      radius    = 1200,   -- m from the fleeing vehicle
+      maxAGL    = 1500,   -- m, must be below this to count as overwatch
+      rateBonus = 1.5,    -- pressure build multiplier while the watch holds
+    },
   },
   swat = {
     severity      = { min = 1, max = 10 },  -- scenario escalation, one roll per scenario
@@ -513,6 +544,46 @@ CIV.Config = {
       accelLimit    = 3.0,   -- m/s^2 spike threshold (gravity excluded)
       penaltyPerHit = 0.05,  -- quality lost per sampled spike
     },
+  },
+
+  -- Medical transfer (air ambulance): event CHAIN on the rescue module.
+  -- When a helicopter delivers a high-severity patient to a hospital,
+  -- sometimes the patient must continue to a regional hospital far away:
+  -- a transfer job spawns from the CIVIL VIP Pad nearest the delivery to
+  -- a distant pad. Boarding works like the VIP shuttle (pads sit on
+  -- aprons, so the light fixed-wing are the natural air ambulance), but
+  -- the passenger is a patient: a criticality clock ticks and the comfort
+  -- threshold is tighter. Requires 2+ CIVIL VIP Pad zones.
+  medTransfer = {
+    enabled      = true,
+    chance       = 40,      -- % that a qualifying delivery spawns the transfer leg
+    minSeverity  = 7,       -- only patients this bad need the regional hospital
+    minLeg       = 15000,   -- m, destination pad at least this far from pickup
+    boardSeconds = 20,
+    pickupTtl    = 1800,    -- s before the transfer is reassigned (task expires)
+    deadline     = { atMin = 2400, atMax = 1200 },  -- s criticality clock, severity-scaled
+    comfort = {
+      accelLimit    = 2.5,  -- the patient tolerates less than a VIP
+      penaltyPerHit = 0.05,
+    },
+  },
+
+  -- Skydive drops: the flying club. Climb over a CIVIL Drop Zone, release
+  -- the jumpers via F10 above minAGL, and the landing point is computed
+  -- from the wind (freefall drift + full canopy drift, with a steer
+  -- correction toward the DZ center). Jumpers spawn on the ground where
+  -- they land; the score quality is the distance from the zone center.
+  skydive = {
+    enabled       = true,
+    jumpers       = 4,      -- figures spawned per drop
+    minAGL        = 800,    -- m, minimum release height
+    freefallSpeed = 50,     -- m/s vertical, belly-to-earth
+    openAGL       = 500,    -- m, canopy opening height
+    canopySink    = 5,      -- m/s under canopy
+    freefallDrift = 0.3,    -- fraction of the wind acting during freefall
+    steerM        = 150,    -- m the jumpers steer back toward the DZ center
+    cooldown      = 180,    -- s per aircraft between drops
+    despawnDelay  = 300,    -- s the landed jumpers stay on the ground
   },
 
   -- Media coverage: any player helicopter holding in the filming ring
@@ -1822,6 +1893,11 @@ CIV.Fire = { _fires = {}, _fid = 0 }
 local Fire = CIV.Fire
 local SEV = CF.severity
 local dispatchFireTrucks, releaseFireTrucks   -- defined in the brigade section
+local coordinationBonus                       -- defined in the C-130 section
+
+-- FIREWATCH state: region zone name -> { time, playerName } of the last
+-- patrol pass while the region had no active fire (see the patrol loop)
+local regionPatrols = {}
 
 -- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL, 5..8 = thick smoke
 -- only (used by smokeOnly fire kinds such as a landfill fire)
@@ -1889,6 +1965,18 @@ function Fire.ignite(pt, severityOverride)
     smokeName = "CIVIL_FIRE_" .. Fire._fid,
     effects = {}, markId = nil,
   }
+  local region = CIV.Zones.containing(C.zones.fireRegion, fire.point)
+  fire.regionName = region and region.name
+  -- FIREWATCH early detection: a recent patrol pass over this region means
+  -- the fire is called in before it takes hold. GM-commanded severities are
+  -- deliberate and stay untouched.
+  if not severityOverride and CF.firewatch.enabled and fire.regionName then
+    local patrol = regionPatrols[fire.regionName]
+    if patrol and timer.getTime() - patrol.time <= CF.firewatch.window then
+      fire.severity = math.max(1, fire.severity - CF.firewatch.severityCut)
+      fire.earlyBy = patrol.playerName
+    end
+  end
   fire.nextGrow = timer.getTime() + fire.growEvery
   refreshVisuals(fire)
   Fire._fires[fire.id] = fire
@@ -1900,6 +1988,12 @@ function Fire.ignite(pt, severityOverride)
     "\nFire zone highlighted on the F10 map.", 20)
   CIV.log("Fire #" .. fire.id .. " (" .. kindDef.name .. ") ignited at " ..
     pt.name .. " severity " .. fire.severity)
+  if fire.earlyBy then
+    CIV.msgAll("FIREWATCH: the patrol flown by " .. fire.earlyBy ..
+      " called this fire in early. The response starts ahead of the growth.", 15)
+    CIV.Score.award(fire.earlyBy, "firewatch", 0.8, 0.5,
+      CIV.severityMult(fire.severity), "firewatch early detection")
+  end
   dispatchFireTrucks(fire)
   return fire
 end
@@ -1993,6 +2087,9 @@ end, nil, 15)
 ----------------------------------------------------------------------
 
 local function truckRoute(brigade, fromPoint, firePoint)
+  -- the fire may have been extinguished or called off between the dispatch
+  -- and this delayed call: the brigade is already released then
+  if not brigade then return end
   local g = Group.getByName(brigade.gname)
   if not g then return end
   pcall(function()
@@ -2221,7 +2318,9 @@ local function isAirAttackType(typeName)
 end
 
 -- coordination bonus while an air-attack smoke mark is hot on the fire
-local function coordinationBonus(fire)
+-- (forward-declared at the top: the water drop handlers run before this
+-- section is reached lexically)
+coordinationBonus = function(fire)
   if fire.coordination and timer.getTime() < fire.coordination.untilTime then
     return CF.airAttack.coordination.dropBonus
   end
@@ -2485,6 +2584,27 @@ CIV.schedule(function(_, t)
   end
   return t + CF.spotterInterval
 end, nil, 30)
+
+-- FIREWATCH patrol tracking: an airplane sweeping a fire region that has
+-- no active fire keeps it watched for firewatch.window seconds. Burning
+-- regions do not count as patrol (fight the fire, or spot it: both are
+-- already rewarded).
+if CF.firewatch.enabled then
+  CIV.schedule(function(_, t)
+    if #CIV.Zones.byPrefix(C.zones.fireRegion) == 0 then return t + 120 end
+    CIV.forEachPlayer(function(u, info)
+      if not isAirplane(info) or not u:inAir() then return end
+      local region = CIV.Zones.containing(C.zones.fireRegion, u:getPoint())
+      if not region then return end
+      for _, fire in pairs(Fire._fires) do
+        if fire.regionName == region.name then return end
+      end
+      regionPatrols[region.name] = { time = timer.getTime(),
+                                     playerName = info.playerName }
+    end)
+    return t + 30
+  end, nil, 25)
+end
 
 ----------------------------------------------------------------------
 -- F10 MENUS + EVENT STARTER
@@ -2990,6 +3110,12 @@ CIV.schedule(function(_, t)
               elseif info then
                 CIV.Score.award(info.playerName, subj.scoreType,
                   subj.quality, subj.timeFactor, subj.mult or 1, subj.label)
+                -- event chain: a delivered high-severity patient sometimes
+                -- needs a second leg to a regional hospital (air ambulance,
+                -- see 45_CivilAviation). Guarded: the module is optional.
+                if CIV.MedTransfer then
+                  CIV.MedTransfer.maybeStart(subj.evt.severity, p)
+                end
               end
             end
             R._aboard[uname] = {}
@@ -3430,8 +3556,35 @@ CIV.schedule(function(_, t)
           contact = true
         end
       end)
+
+      -- TRAFFIC WATCH: an airplane orbiting over the fugitive keeps the
+      -- pursuit on camera; while the watch holds, helicopter pressure
+      -- builds faster and the watcher earns an assist on the arrest
+      local TW = CP.trafficWatch
+      local watcher = nil
+      if TW.enabled then
+        CIV.forEachPlayer(function(a, info)
+          if watcher or info.category ~= Unit.Category.AIRPLANE then return end
+          if not a:inAir() then return end
+          local ap = a:getPoint()
+          if CIV.dist2D(ap, p) <= TW.radius and CIV.agl(ap) <= TW.maxAGL then
+            watcher = info
+          end
+        end)
+      end
+      if watcher then
+        chase.watcherName = watcher.playerName
+        if not chase.watchAnnounced then
+          chase.watchAnnounced = true
+          CIV.msgAll("TRAFFIC WATCH: " .. watcher.playerName ..
+            " is tracking the fugitive from above. Pressure builds " ..
+            "faster while the watch holds.", 12)
+        end
+      end
+
       if contact then
-        chase.pressure = math.min(100, chase.pressure + chase.rateUp * 2)   -- 2 s tick
+        chase.pressure = math.min(100,
+          chase.pressure + chase.rateUp * (watcher and TW.rateBonus or 1) * 2)   -- 2 s tick
       else
         chase.pressure = math.max(0, chase.pressure - chase.rateDown * 2)
       end
@@ -3446,6 +3599,10 @@ CIV.schedule(function(_, t)
         if closest then
           CIV.Score.award(closest.playerName, "chase", 0.8, 0.5,
             CIV.severityMult(chase.severity), "fugitive arrest")
+        end
+        if chase.watcherName then
+          CIV.Score.award(chase.watcherName, "trafficWatch", 0.8, 0.5,
+            CIV.severityMult(chase.severity), "traffic watch assist")
         end
         closeChase(chase, 90)
       else
@@ -4013,6 +4170,15 @@ CIV.log("CivilTransport loaded")
 --   MEDIA: any player helicopter or airplane holding in the filming ring
 --   around an active event accumulates footage; when the story airs the
 --   pilot is credited. One award per event, passive, no menu needed.
+--
+--   MEDICAL TRANSFER: event chain on the rescue module. A delivered
+--   high-severity patient sometimes needs a second leg to a regional
+--   hospital far away: pad to pad on the VIP Pad pool, with a criticality
+--   clock and a tighter comfort threshold. The air ambulance job.
+--
+--   SKYDIVE: climb over a "CIVIL Drop Zone", release the jumpers via F10.
+--   Landing point = wind drift (freefall damped + full canopy) plus a
+--   steer correction toward the center; score quality = accuracy.
 ----------------------------------------------------------------------
 
 assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
@@ -4293,6 +4459,259 @@ CIV.schedule(function(_, t)
 end, nil, 15)
 
 ----------------------------------------------------------------------
+-- MEDICAL TRANSFER (air ambulance)
+-- Chain trigger: the rescue module's hospital delivery loop calls
+-- MT.maybeStart (guarded) after a successful delivery. Standalone starts
+-- work too (admin menu, "civil transfer" marker command).
+----------------------------------------------------------------------
+
+CIV.MedTransfer = { _jobs = {}, _tid = 0 }
+local MT = CIV.MedTransfer
+local CT = C.medTransfer
+
+-- opts: { severity = 1..10, nearPoint = vec3 (pickup snaps to nearest pad) }
+function MT.start(opts)
+  if not CT.enabled then return nil end
+  local pads = padCandidates()
+  if #pads < 2 then return nil end
+  opts = opts or {}
+
+  local from
+  if opts.nearPoint then
+    local bestDist = 1e12
+    for _, pad in ipairs(pads) do
+      local d = CIV.dist2D(pad.point, opts.nearPoint)
+      if d < bestDist then from, bestDist = pad, d end
+    end
+  else
+    from = pads[math.random(#pads)]
+  end
+
+  -- the regional hospital should be a real leg away; when the pool is
+  -- tight, fall back to the farthest pad available
+  local candidates, farthest, farDist = {}, nil, -1
+  for _, pad in ipairs(pads) do
+    if pad.name ~= from.name then
+      local d = CIV.dist2D(pad.point, from.point)
+      if d >= CT.minLeg then candidates[#candidates + 1] = pad end
+      if d > farDist then farthest, farDist = pad, d end
+    end
+  end
+  local dest = #candidates > 0 and candidates[math.random(#candidates)] or farthest
+  if not dest then return nil end
+
+  MT._tid = MT._tid + 1
+  local sev = opts.severity
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity({ min = CT.minSeverity, max = 10 })
+  local job = {
+    id = MT._tid, from = from, to = dest, severity = sev,
+    deadline = timer.getTime()
+      + CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
+    deadlineTotal = CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
+    expiresAt = timer.getTime() + CT.pickupTtl,
+    state = "waiting", unitName = nil,
+    penalty = 0, lastVel = nil, lastComplaint = 0,
+    boardTimer = {}, dropTimer = nil,
+    gname = CIV.spawnFromTemplate(C.templates.survivor, from.point),
+  }
+  MT._jobs[job.id] = job
+  CIV.msgAll("MEDICAL TRANSFER (severity " .. sev .. "/10): a patient at " ..
+    from.name .. " must reach the regional hospital at " .. dest.name ..
+    ".\n" .. CIV.coordText(from.point) ..
+    "\nCriticality: " .. math.floor(job.deadlineTotal / 60) .. " minutes. " ..
+    "Land and hold " .. CT.boardSeconds .. " seconds to board. Fly fast " ..
+    "AND smooth: this passenger is on a stretcher.", 25)
+  CIV.log("Medical transfer #" .. job.id .. " " .. from.name .. " -> " ..
+    dest.name .. " severity " .. sev)
+  return job
+end
+
+-- rescue chain hook, called (guarded) by the hospital delivery loop
+function MT.maybeStart(severity, deliveryPoint)
+  if not CT.enabled then return end
+  if (severity or 0) < CT.minSeverity then return end
+  if math.random(100) > CT.chance then return end
+  MT.start({ severity = severity, nearPoint = deliveryPoint })
+end
+
+local function closeTransfer(job)
+  MT._jobs[job.id] = nil
+  if job.gname then CIV.despawnGroup(job.gname) end
+end
+
+-- command center: close a job without any outcome
+function MT.cancel(job)
+  if not MT._jobs[job.id] then return false end
+  closeTransfer(job)
+  return true
+end
+
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, job in pairs(MT._jobs) do
+    if now > job.deadline then
+      CIV.msgAll("MEDICAL TRANSFER: the patient did not survive the wait. " ..
+        "Task failed.", 15)
+      closeTransfer(job)
+    elseif job.state == "waiting" then
+      if now > job.expiresAt then
+        CIV.msgAll("MEDICAL TRANSFER: reassigned to a ground ambulance. " ..
+          "Task expired.", 12)
+        closeTransfer(job)
+      else
+        -- pads sit on aprons: airplanes are the natural air ambulance,
+        -- but a helicopter may take the leg too
+        CIV.forEachPlayer(function(u, info)
+          if info.category ~= Unit.Category.HELICOPTER
+             and info.category ~= Unit.Category.AIRPLANE then return end
+          if job.state ~= "waiting" then return end
+          if landedOnPad(u, job.from) then
+            job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
+            if job.boardTimer[info.unitName] >= CT.boardSeconds then
+              job.state = "flying"
+              job.unitName = info.unitName
+              job.lastVel = u:getVelocity()
+              if job.gname then CIV.despawnGroup(job.gname) job.gname = nil end
+              CIV.msgUnit(u, "Patient aboard. Destination: " .. job.to.name ..
+                "\n" .. CIV.coordText(job.to.point) ..
+                "\nCriticality: " .. math.max(0,
+                  math.floor((job.deadline - now) / 60)) .. " minutes.", 20)
+            end
+          else
+            job.boardTimer[info.unitName] = nil
+          end
+        end)
+      end
+    elseif job.state == "flying" then
+      local u = Unit.getByName(job.unitName)
+      if not u or not u:isExist() then
+        CIV.msgAll("MEDICAL TRANSFER: transport lost with the patient aboard.", 12)
+        closeTransfer(job)
+      else
+        -- comfort sampling like the VIP job, tighter threshold (2 s tick)
+        local v = u:getVelocity()
+        if job.lastVel then
+          local ax = (v.x - job.lastVel.x) / 2
+          local ay = (v.y - job.lastVel.y) / 2
+          local az = (v.z - job.lastVel.z) / 2
+          local accel = math.sqrt(ax * ax + ay * ay + az * az)
+          if accel > CT.comfort.accelLimit then
+            job.penalty = job.penalty + CT.comfort.penaltyPerHit
+            if now - job.lastComplaint > 30 then
+              job.lastComplaint = now
+              CIV.msgUnit(u, "The medic in the back: keep it steady!", 8)
+            end
+          end
+        end
+        job.lastVel = v
+        if landedOnPad(u, job.to) then
+          job.dropTimer = (job.dropTimer or 0) + 2
+          if job.dropTimer >= CT.boardSeconds then
+            local info = CIV.players[job.unitName]
+            local quality = math.max(0, 1 - job.penalty)
+            local timeFactor = math.max(0, (job.deadline - now) / job.deadlineTotal)
+            if info then
+              CIV.Score.award(info.playerName, "medTransfer", quality, timeFactor,
+                CIV.severityMult(job.severity),
+                string.format("medical transfer (comfort %d%%)",
+                  math.floor(quality * 100)))
+            end
+            CIV.msgAll("MEDICAL TRANSFER: patient handed over at " ..
+              job.to.name .. " in time.", 15)
+            closeTransfer(job)
+          end
+        else
+          job.dropTimer = nil
+        end
+      end
+    end
+  end
+  return t + 2
+end, nil, 15)
+
+----------------------------------------------------------------------
+-- SKYDIVE DROPS (the flying club)
+----------------------------------------------------------------------
+
+CIV.Skydive = {}
+local SK = CIV.Skydive
+local SKC = C.skydive
+local lastDrop = {}   -- unitName -> time of the last release
+
+function SK.release(uname)
+  if not SKC.enabled then return end
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local info = CIV.players[uname]
+  if not info then return end
+  if not u:inAir() then
+    CIV.msgUnit(u, "The jumpers politely decline to exit on the ground.", 10)
+    return
+  end
+  local p = u:getPoint()
+  local dz = CIV.Zones.containing(C.zones.dropZones, p)
+  if not dz then
+    CIV.msgUnit(u, #CIV.Zones.byPrefix(C.zones.dropZones) == 0
+      and ("No '" .. C.zones.dropZones .. "' zone is defined in this mission.")
+      or "You are not over a drop zone.", 10)
+    return
+  end
+  local agl = CIV.agl(p)
+  if agl < SKC.minAGL then
+    CIV.msgUnit(u, "Too low for a jump: release above " .. SKC.minAGL ..
+      " m AGL.", 10)
+    return
+  end
+  local now = timer.getTime()
+  if lastDrop[uname] and now - lastDrop[uname] < SKC.cooldown then
+    CIV.msgUnit(u, "The next load of jumpers is still kitting up: " ..
+      math.ceil(SKC.cooldown - (now - lastDrop[uname])) .. " s.", 10)
+    return
+  end
+  lastDrop[uname] = now
+
+  -- wind sampled once at mid-canopy height (zero wind if the API balks)
+  local wind = { x = 0, y = 0, z = 0 }
+  pcall(function()
+    local w = atmosphere.getWind({ x = p.x,
+      y = CIV.groundY(p) + SKC.openAGL / 2, z = p.z })
+    if w and w.x then wind = w end
+  end)
+  local ffTime = math.max(0, agl - SKC.openAGL) / SKC.freefallSpeed
+  local canopyTime = math.min(agl, SKC.openAGL) / SKC.canopySink
+  local drift = ffTime * SKC.freefallDrift + canopyTime
+  local lp = { x = p.x + wind.x * drift, z = p.z + wind.z * drift }
+
+  -- under canopy the jumpers steer back toward the DZ center
+  local center = { x = dz.center.x, z = dz.center.z }
+  local off = CIV.dist2D(lp, center)
+  if off > 0 then
+    local pull = math.min(SKC.steerM, off)
+    lp.x = lp.x + (center.x - lp.x) / off * pull
+    lp.z = lp.z + (center.z - lp.z) / off * pull
+  end
+  lp.y = land.getHeight({ x = lp.x, y = lp.z })
+
+  local playerName, dzName, dzRadius = info.playerName, dz.name, dz.radius or 300
+  CIV.msgUnit(u, SKC.jumpers .. " jumpers away over " .. dzName ..
+    "! Canopies in the air.", 10)
+  CIV.schedule(function()
+    local gname = CIV.spawnGround(lp, SKC.jumpers, C.templates.skydiver,
+      C.fallbackTypes.skydiver, "CIVIL_SKYDIVE")
+    local dist = math.floor(CIV.dist2D(lp, center) + 0.5)
+    local quality = math.max(0, 1 - dist / math.max(100, dzRadius))
+    CIV.Score.award(playerName, "skydive", quality, 0.5, 1,
+      string.format("skydive drop (%d m from center)", dist))
+    CIV.msgAll("SKYDIVE: the jumpers released by " .. playerName ..
+      " landed " .. dist .. " m from the center of " .. dzName .. ".", 12)
+    if gname then
+      CIV.schedule(function() CIV.despawnGroup(gname) end, nil, SKC.despawnDelay)
+    end
+  end, nil, math.max(1, ffTime + canopyTime))
+end
+
+----------------------------------------------------------------------
 -- MEDIA COVERAGE (passive)
 ----------------------------------------------------------------------
 
@@ -4377,6 +4796,8 @@ CIV.Menu_register(function(gid, uname)
   local sub = missionCommands.addSubMenuForGroup(gid, "Aviation tasks", CIV.rootMenu[gid])
   missionCommands.addCommandForGroup(gid, "Recon: report anomaly overhead",
     sub, reportAnomaly, uname)
+  missionCommands.addCommandForGroup(gid, "Skydive: release jumpers (over a drop zone)",
+    sub, SK.release, uname)
   missionCommands.addCommandForGroup(gid, "Active aviation tasks", sub, function()
     local n, txt = 0, "Active aviation tasks:\n"
     for _, a in pairs(RC._anomalies) do
@@ -4389,12 +4810,20 @@ CIV.Menu_register(function(gid, uname)
       txt = txt .. string.format("- VIP %s -> %s (%s)\n", job.from.name,
         job.to.name, job.state)
     end
+    for _, job in pairs(MT._jobs) do
+      n = n + 1
+      txt = txt .. string.format(
+        "- Medical transfer %s -> %s (%s, %d min left)\n", job.from.name,
+        job.to.name, job.state,
+        math.max(0, math.floor((job.deadline - timer.getTime()) / 60)))
+    end
     CIV.msgGroupId(gid, n > 0 and txt or "No active aviation tasks.", 20)
   end)
 end)
 
 CIV.EventStarters.recon = { label = "Recon anomaly", fn = function() return RC.start() end }
 CIV.EventStarters.vip = { label = "VIP shuttle", fn = function() return VP.start() end }
+CIV.EventStarters.transfer = { label = "Medical transfer", fn = function() return MT.start() end }
 
 CIV.log("CivilAviation loaded")
 
@@ -4422,6 +4851,9 @@ CIV.log("CivilAviation loaded")
 --   civil casevac [sev]       battlefield casualty at the marker
 --   civil swat [sev]          SWAT objective at the marker
 --   civil chase [sev]         chase from the crossroad nearest the marker
+--   civil recon [sev]         corridor anomaly at the marker
+--   civil vip [sev]           VIP shuttle from the pad nearest the marker
+--   civil transfer [sev]      medical transfer from the pad nearest the marker
 --   civil cargo [tier] [pri]  loading point at the marker (tier: light/
 --                             medium/heavy/heavy_lift)
 --   civil spawn <tpl> [n]     clone a late-activated template whose name
@@ -4555,6 +4987,12 @@ local function cancelNearest(point)
         function() CIV.VIP.cancel(job) end)
     end
   end
+  if CIV.MedTransfer then
+    for _, job in pairs(CIV.MedTransfer._jobs) do
+      consider(job.from.point, "medical transfer from " .. job.from.name,
+        function() CIV.MedTransfer.cancel(job) end)
+    end
+  end
   if best then
     best.fn()
     say("cancelled: " .. best.label .. ".")
@@ -4611,6 +5049,14 @@ commands.vip = function(args, point)
   if not CIV.VIP then moduleMissing("aviation") return end
   if not CIV.VIP.start({ point = point, severity = toSeverity(args[1]) }) then
     say("vip command failed (needs at least 2 CIVIL VIP Pad zones).")
+  end
+end
+
+commands.transfer = function(args, point)
+  if not CIV.MedTransfer then moduleMissing("aviation") return end
+  if not CIV.MedTransfer.start({ nearPoint = point,
+      severity = toSeverity(args[1]) }) then
+    say("transfer command failed (needs at least 2 CIVIL VIP Pad zones).")
   end
 end
 
@@ -4700,7 +5146,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer [severity]\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..
     CMD.markerPrefix .. " move <group> [speed] [road]\n" ..

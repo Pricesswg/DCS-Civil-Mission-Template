@@ -74,7 +74,8 @@ in any destination zone.
 | `CIVIL SWAT Point ...` | SWAT scenarios | rooftops / urban LZs (rooftop spawn TO TEST) |
 | `CIVIL Cargo Point ...` | cargo loading points | flat ground |
 | `CIVIL Recon Point ...` | inspection corridor | 5+ zones along a power line or pipeline; anomalies spawn on them |
-| `CIVIL VIP Pad ...` | passenger shuttle pads | at least 2 helipads; pickup and destination drawn from this pool |
+| `CIVIL VIP Pad ...` | passenger shuttle + medical transfer pads | at least 2; put them on airfield aprons and both jobs open up to the fixed-wing. Transfer legs pick a destination at least `medTransfer.minLeg` away (default 15 km), so spread the pads out |
+| `CIVIL Drop Zone ...` | skydive drop zones | optional; an open field per zone. The zone RADIUS is the scoring scale (accuracy = distance from center vs radius), 300-500 m works well |
 | `CIVIL Cargo Destination ...` | cargo delivery | one or more destination zones; deliveries and supply airdrops count in any of them |
 | `CIVIL Medevac Point ...` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point ...` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
@@ -193,6 +194,7 @@ the event runs anyway.
 | `CIVIL Fire Truck ...` | fire brigade truck (vehicle) | `HEMTT TFFT` |
 | `CIVIL Anomaly ...` | recon anomaly visual (ground) | none, logical anomaly |
 | `CIVIL VIP ...` | waiting passenger visual (ground) | none, logical passenger |
+| `CIVIL Skydiver ...` | landed jumpers (ground) | `Soldier M4` |
 
 ## 4b. Ships (regular units placed in the ME, matched by name prefix)
 
@@ -255,8 +257,9 @@ examples in the README):
 
 ```
 civil director off   civil fire 8   civil medevac 9   civil swat 7
-civil cargo heavy 9  civil spawn survivor 3   civil move alpha 12 road
-civil cancel         civil director on        civil help
+civil cargo heavy 9  civil transfer 8         civil spawn survivor 3
+civil move alpha 12 road   civil cancel       civil director on
+civil help
 ```
 
 If the commander goes quiet (leaves, disconnects, or stops commanding), the
@@ -292,14 +295,19 @@ mission resumes AUTOMATIC mode by itself after
   retardant on fires, crates = supplies at the destination; until the
   official module's crate type names are validated, `matchAnyObject = true`
   makes the impact location decide).
-- **Aviation tasks**: report a recon anomaly from overhead, list active
-  recon/VIP tasks. Media coverage is passive: hold the filming ring around
-  any event for 5 minutes (helicopters and airplanes). Every airplane can
-  spot (fires and rescue subjects, with spotter points on identification)
-  and serve VIP pads placed on airfield aprons. Light air-attack types
-  (see `fire.airAttack`) cannot haul retardant: their job is the smoke
-  mark on the fire, which buffs everyone's drops for 5 minutes and pays
-  them the assist on extinguish.
+- **Aviation tasks**: report a recon anomaly from overhead, release
+  skydivers over a drop zone, list active recon/VIP/transfer tasks. Media
+  coverage is passive: hold the filming ring around any event for 5
+  minutes (helicopters and airplanes). Every airplane can spot (fires and
+  rescue subjects, with spotter points on identification) and serve VIP
+  pads placed on airfield aprons. Light air-attack types (see
+  `fire.airAttack`) cannot haul retardant: their job is the smoke mark on
+  the fire, which buffs everyone's drops for 5 minutes and pays them the
+  assist on extinguish. Two passive airplane rewards run on top: patrolling
+  a quiet fire region keeps it watched (fires there start smaller, with
+  credit), and orbiting over a police chase speeds up the helicopter's
+  pressure build and pays an arrest assist. Medical transfers spawn as a
+  chain after severity 7+ hospital deliveries (`medTransfer.chance`).
 - **Admin (test)**: manual start of every event, pool status.
 
 ## 9. In-game test checklist (before serious use)

@@ -19,6 +19,9 @@
 --   civil casevac [sev]       battlefield casualty at the marker
 --   civil swat [sev]          SWAT objective at the marker
 --   civil chase [sev]         chase from the crossroad nearest the marker
+--   civil recon [sev]         corridor anomaly at the marker
+--   civil vip [sev]           VIP shuttle from the pad nearest the marker
+--   civil transfer [sev]      medical transfer from the pad nearest the marker
 --   civil cargo [tier] [pri]  loading point at the marker (tier: light/
 --                             medium/heavy/heavy_lift)
 --   civil spawn <tpl> [n]     clone a late-activated template whose name
@@ -152,6 +155,12 @@ local function cancelNearest(point)
         function() CIV.VIP.cancel(job) end)
     end
   end
+  if CIV.MedTransfer then
+    for _, job in pairs(CIV.MedTransfer._jobs) do
+      consider(job.from.point, "medical transfer from " .. job.from.name,
+        function() CIV.MedTransfer.cancel(job) end)
+    end
+  end
   if best then
     best.fn()
     say("cancelled: " .. best.label .. ".")
@@ -208,6 +217,14 @@ commands.vip = function(args, point)
   if not CIV.VIP then moduleMissing("aviation") return end
   if not CIV.VIP.start({ point = point, severity = toSeverity(args[1]) }) then
     say("vip command failed (needs at least 2 CIVIL VIP Pad zones).")
+  end
+end
+
+commands.transfer = function(args, point)
+  if not CIV.MedTransfer then moduleMissing("aviation") return end
+  if not CIV.MedTransfer.start({ nearPoint = point,
+      severity = toSeverity(args[1]) }) then
+    say("transfer command failed (needs at least 2 CIVIL VIP Pad zones).")
   end
 end
 
@@ -297,7 +314,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer [severity]\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..
     CMD.markerPrefix .. " move <group> [speed] [road]\n" ..

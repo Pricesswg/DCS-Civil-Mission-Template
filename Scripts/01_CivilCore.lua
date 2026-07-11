@@ -68,6 +68,7 @@ CIV.Config = {
     vesselSpawn       = "CIVIL Vessel Spawn",         -- harbor zones where stock rescue boats are launched
     reconPoints       = "CIVIL Recon Point",          -- inspection corridor waypoints (anomalies spawn on them)
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
+    dropZones         = "CIVIL Drop Zone",            -- skydive drop zones (score = distance from center)
   },
 
   ------------------------------------------------------------------
@@ -85,6 +86,7 @@ CIV.Config = {
     fireTruck= "CIVIL Fire Truck", -- vehicle group: fire brigade truck
     anomaly  = "CIVIL Anomaly",    -- ground group: recon corridor anomaly (optional visual)
     vip      = "CIVIL VIP",        -- ground group: waiting passenger (optional visual)
+    skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -93,6 +95,7 @@ CIV.Config = {
     swat       = "Soldier M4",
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
     fireTruck  = "HEMTT TFFT",     -- stock airfield fire truck, TO VALIDATE
+    skydiver   = "Soldier M4",
   },
 
   -- Automatic scenery dressing of fixed zones. The C-130 reload and the
@@ -144,6 +147,10 @@ CIV.Config = {
       media       = 8,      -- live footage of an active event
       spotter     = 6,      -- rescue subject identified from the air
       airAttack   = 8,      -- fire marked and extinguished while coordinated
+      medTransfer = 14,     -- long-range air ambulance leg after a hospital delivery
+      trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
+      firewatch   = 5,      -- fire spotted early by a preventive patrol
+      skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -270,6 +277,18 @@ CIV.Config = {
         seconds = 300,      -- how long the mark stays hot
         dropBonus = 1.25,   -- score multiplier for drops on a marked fire
       },
+    },
+
+    -- FIREWATCH preventive patrol: an airplane sweeping a fire region while
+    -- no fire burns there keeps that region "watched". A fire igniting in a
+    -- watched region is called in early: it starts smaller (severityCut off
+    -- the initial roll) and the patrolling pilot is credited. Rewards flying
+    -- the quiet stretches of the session, not only chasing the callouts.
+    -- GM-commanded fires ("civil fire 7") keep their commanded severity.
+    firewatch = {
+      enabled     = true,
+      window      = 900,   -- s a patrol pass keeps the region watched
+      severityCut = 2,     -- severity removed from the initial roll
     },
 
     -- Physical retardant airdrop (official C-130 module). See the generic
@@ -436,6 +455,18 @@ CIV.Config = {
     routeHops      = 3,     -- waypoints generated ahead (local random walk)
     neighborRadius = 1500,  -- m, "nearby points" for the random walk
     sceneTemplates = { "CIVIL Scene Robbery" },  -- scene at the chase start crossroad (optional)
+
+    -- TRAFFIC WATCH: the fixed-wing job on a chase, mirroring the air
+    -- attack role on fires. An airplane orbiting over the fugitive (within
+    -- radius, below maxAGL) keeps the pursuit on camera: while it holds
+    -- contact the helicopter's pressure builds rateBonus times faster, and
+    -- the watcher earns an assist when the arrest lands.
+    trafficWatch = {
+      enabled   = true,
+      radius    = 1200,   -- m from the fleeing vehicle
+      maxAGL    = 1500,   -- m, must be below this to count as overwatch
+      rateBonus = 1.5,    -- pressure build multiplier while the watch holds
+    },
   },
   swat = {
     severity      = { min = 1, max = 10 },  -- scenario escalation, one roll per scenario
@@ -503,6 +534,46 @@ CIV.Config = {
       accelLimit    = 3.0,   -- m/s^2 spike threshold (gravity excluded)
       penaltyPerHit = 0.05,  -- quality lost per sampled spike
     },
+  },
+
+  -- Medical transfer (air ambulance): event CHAIN on the rescue module.
+  -- When a helicopter delivers a high-severity patient to a hospital,
+  -- sometimes the patient must continue to a regional hospital far away:
+  -- a transfer job spawns from the CIVIL VIP Pad nearest the delivery to
+  -- a distant pad. Boarding works like the VIP shuttle (pads sit on
+  -- aprons, so the light fixed-wing are the natural air ambulance), but
+  -- the passenger is a patient: a criticality clock ticks and the comfort
+  -- threshold is tighter. Requires 2+ CIVIL VIP Pad zones.
+  medTransfer = {
+    enabled      = true,
+    chance       = 40,      -- % that a qualifying delivery spawns the transfer leg
+    minSeverity  = 7,       -- only patients this bad need the regional hospital
+    minLeg       = 15000,   -- m, destination pad at least this far from pickup
+    boardSeconds = 20,
+    pickupTtl    = 1800,    -- s before the transfer is reassigned (task expires)
+    deadline     = { atMin = 2400, atMax = 1200 },  -- s criticality clock, severity-scaled
+    comfort = {
+      accelLimit    = 2.5,  -- the patient tolerates less than a VIP
+      penaltyPerHit = 0.05,
+    },
+  },
+
+  -- Skydive drops: the flying club. Climb over a CIVIL Drop Zone, release
+  -- the jumpers via F10 above minAGL, and the landing point is computed
+  -- from the wind (freefall drift + full canopy drift, with a steer
+  -- correction toward the DZ center). Jumpers spawn on the ground where
+  -- they land; the score quality is the distance from the zone center.
+  skydive = {
+    enabled       = true,
+    jumpers       = 4,      -- figures spawned per drop
+    minAGL        = 800,    -- m, minimum release height
+    freefallSpeed = 50,     -- m/s vertical, belly-to-earth
+    openAGL       = 500,    -- m, canopy opening height
+    canopySink    = 5,      -- m/s under canopy
+    freefallDrift = 0.3,    -- fraction of the wind acting during freefall
+    steerM        = 150,    -- m the jumpers steer back toward the DZ center
+    cooldown      = 180,    -- s per aircraft between drops
+    despawnDelay  = 300,    -- s the landed jumpers stay on the ground
   },
 
   -- Media coverage: any player helicopter holding in the filming ring

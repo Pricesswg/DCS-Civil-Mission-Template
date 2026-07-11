@@ -17,6 +17,15 @@
 --   MEDIA: any player helicopter or airplane holding in the filming ring
 --   around an active event accumulates footage; when the story airs the
 --   pilot is credited. One award per event, passive, no menu needed.
+--
+--   MEDICAL TRANSFER: event chain on the rescue module. A delivered
+--   high-severity patient sometimes needs a second leg to a regional
+--   hospital far away: pad to pad on the VIP Pad pool, with a criticality
+--   clock and a tighter comfort threshold. The air ambulance job.
+--
+--   SKYDIVE: climb over a "CIVIL Drop Zone", release the jumpers via F10.
+--   Landing point = wind drift (freefall damped + full canopy) plus a
+--   steer correction toward the center; score quality = accuracy.
 ----------------------------------------------------------------------
 
 assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
@@ -297,6 +306,259 @@ CIV.schedule(function(_, t)
 end, nil, 15)
 
 ----------------------------------------------------------------------
+-- MEDICAL TRANSFER (air ambulance)
+-- Chain trigger: the rescue module's hospital delivery loop calls
+-- MT.maybeStart (guarded) after a successful delivery. Standalone starts
+-- work too (admin menu, "civil transfer" marker command).
+----------------------------------------------------------------------
+
+CIV.MedTransfer = { _jobs = {}, _tid = 0 }
+local MT = CIV.MedTransfer
+local CT = C.medTransfer
+
+-- opts: { severity = 1..10, nearPoint = vec3 (pickup snaps to nearest pad) }
+function MT.start(opts)
+  if not CT.enabled then return nil end
+  local pads = padCandidates()
+  if #pads < 2 then return nil end
+  opts = opts or {}
+
+  local from
+  if opts.nearPoint then
+    local bestDist = 1e12
+    for _, pad in ipairs(pads) do
+      local d = CIV.dist2D(pad.point, opts.nearPoint)
+      if d < bestDist then from, bestDist = pad, d end
+    end
+  else
+    from = pads[math.random(#pads)]
+  end
+
+  -- the regional hospital should be a real leg away; when the pool is
+  -- tight, fall back to the farthest pad available
+  local candidates, farthest, farDist = {}, nil, -1
+  for _, pad in ipairs(pads) do
+    if pad.name ~= from.name then
+      local d = CIV.dist2D(pad.point, from.point)
+      if d >= CT.minLeg then candidates[#candidates + 1] = pad end
+      if d > farDist then farthest, farDist = pad, d end
+    end
+  end
+  local dest = #candidates > 0 and candidates[math.random(#candidates)] or farthest
+  if not dest then return nil end
+
+  MT._tid = MT._tid + 1
+  local sev = opts.severity
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity({ min = CT.minSeverity, max = 10 })
+  local job = {
+    id = MT._tid, from = from, to = dest, severity = sev,
+    deadline = timer.getTime()
+      + CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
+    deadlineTotal = CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
+    expiresAt = timer.getTime() + CT.pickupTtl,
+    state = "waiting", unitName = nil,
+    penalty = 0, lastVel = nil, lastComplaint = 0,
+    boardTimer = {}, dropTimer = nil,
+    gname = CIV.spawnFromTemplate(C.templates.survivor, from.point),
+  }
+  MT._jobs[job.id] = job
+  CIV.msgAll("MEDICAL TRANSFER (severity " .. sev .. "/10): a patient at " ..
+    from.name .. " must reach the regional hospital at " .. dest.name ..
+    ".\n" .. CIV.coordText(from.point) ..
+    "\nCriticality: " .. math.floor(job.deadlineTotal / 60) .. " minutes. " ..
+    "Land and hold " .. CT.boardSeconds .. " seconds to board. Fly fast " ..
+    "AND smooth: this passenger is on a stretcher.", 25)
+  CIV.log("Medical transfer #" .. job.id .. " " .. from.name .. " -> " ..
+    dest.name .. " severity " .. sev)
+  return job
+end
+
+-- rescue chain hook, called (guarded) by the hospital delivery loop
+function MT.maybeStart(severity, deliveryPoint)
+  if not CT.enabled then return end
+  if (severity or 0) < CT.minSeverity then return end
+  if math.random(100) > CT.chance then return end
+  MT.start({ severity = severity, nearPoint = deliveryPoint })
+end
+
+local function closeTransfer(job)
+  MT._jobs[job.id] = nil
+  if job.gname then CIV.despawnGroup(job.gname) end
+end
+
+-- command center: close a job without any outcome
+function MT.cancel(job)
+  if not MT._jobs[job.id] then return false end
+  closeTransfer(job)
+  return true
+end
+
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, job in pairs(MT._jobs) do
+    if now > job.deadline then
+      CIV.msgAll("MEDICAL TRANSFER: the patient did not survive the wait. " ..
+        "Task failed.", 15)
+      closeTransfer(job)
+    elseif job.state == "waiting" then
+      if now > job.expiresAt then
+        CIV.msgAll("MEDICAL TRANSFER: reassigned to a ground ambulance. " ..
+          "Task expired.", 12)
+        closeTransfer(job)
+      else
+        -- pads sit on aprons: airplanes are the natural air ambulance,
+        -- but a helicopter may take the leg too
+        CIV.forEachPlayer(function(u, info)
+          if info.category ~= Unit.Category.HELICOPTER
+             and info.category ~= Unit.Category.AIRPLANE then return end
+          if job.state ~= "waiting" then return end
+          if landedOnPad(u, job.from) then
+            job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
+            if job.boardTimer[info.unitName] >= CT.boardSeconds then
+              job.state = "flying"
+              job.unitName = info.unitName
+              job.lastVel = u:getVelocity()
+              if job.gname then CIV.despawnGroup(job.gname) job.gname = nil end
+              CIV.msgUnit(u, "Patient aboard. Destination: " .. job.to.name ..
+                "\n" .. CIV.coordText(job.to.point) ..
+                "\nCriticality: " .. math.max(0,
+                  math.floor((job.deadline - now) / 60)) .. " minutes.", 20)
+            end
+          else
+            job.boardTimer[info.unitName] = nil
+          end
+        end)
+      end
+    elseif job.state == "flying" then
+      local u = Unit.getByName(job.unitName)
+      if not u or not u:isExist() then
+        CIV.msgAll("MEDICAL TRANSFER: transport lost with the patient aboard.", 12)
+        closeTransfer(job)
+      else
+        -- comfort sampling like the VIP job, tighter threshold (2 s tick)
+        local v = u:getVelocity()
+        if job.lastVel then
+          local ax = (v.x - job.lastVel.x) / 2
+          local ay = (v.y - job.lastVel.y) / 2
+          local az = (v.z - job.lastVel.z) / 2
+          local accel = math.sqrt(ax * ax + ay * ay + az * az)
+          if accel > CT.comfort.accelLimit then
+            job.penalty = job.penalty + CT.comfort.penaltyPerHit
+            if now - job.lastComplaint > 30 then
+              job.lastComplaint = now
+              CIV.msgUnit(u, "The medic in the back: keep it steady!", 8)
+            end
+          end
+        end
+        job.lastVel = v
+        if landedOnPad(u, job.to) then
+          job.dropTimer = (job.dropTimer or 0) + 2
+          if job.dropTimer >= CT.boardSeconds then
+            local info = CIV.players[job.unitName]
+            local quality = math.max(0, 1 - job.penalty)
+            local timeFactor = math.max(0, (job.deadline - now) / job.deadlineTotal)
+            if info then
+              CIV.Score.award(info.playerName, "medTransfer", quality, timeFactor,
+                CIV.severityMult(job.severity),
+                string.format("medical transfer (comfort %d%%)",
+                  math.floor(quality * 100)))
+            end
+            CIV.msgAll("MEDICAL TRANSFER: patient handed over at " ..
+              job.to.name .. " in time.", 15)
+            closeTransfer(job)
+          end
+        else
+          job.dropTimer = nil
+        end
+      end
+    end
+  end
+  return t + 2
+end, nil, 15)
+
+----------------------------------------------------------------------
+-- SKYDIVE DROPS (the flying club)
+----------------------------------------------------------------------
+
+CIV.Skydive = {}
+local SK = CIV.Skydive
+local SKC = C.skydive
+local lastDrop = {}   -- unitName -> time of the last release
+
+function SK.release(uname)
+  if not SKC.enabled then return end
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local info = CIV.players[uname]
+  if not info then return end
+  if not u:inAir() then
+    CIV.msgUnit(u, "The jumpers politely decline to exit on the ground.", 10)
+    return
+  end
+  local p = u:getPoint()
+  local dz = CIV.Zones.containing(C.zones.dropZones, p)
+  if not dz then
+    CIV.msgUnit(u, #CIV.Zones.byPrefix(C.zones.dropZones) == 0
+      and ("No '" .. C.zones.dropZones .. "' zone is defined in this mission.")
+      or "You are not over a drop zone.", 10)
+    return
+  end
+  local agl = CIV.agl(p)
+  if agl < SKC.minAGL then
+    CIV.msgUnit(u, "Too low for a jump: release above " .. SKC.minAGL ..
+      " m AGL.", 10)
+    return
+  end
+  local now = timer.getTime()
+  if lastDrop[uname] and now - lastDrop[uname] < SKC.cooldown then
+    CIV.msgUnit(u, "The next load of jumpers is still kitting up: " ..
+      math.ceil(SKC.cooldown - (now - lastDrop[uname])) .. " s.", 10)
+    return
+  end
+  lastDrop[uname] = now
+
+  -- wind sampled once at mid-canopy height (zero wind if the API balks)
+  local wind = { x = 0, y = 0, z = 0 }
+  pcall(function()
+    local w = atmosphere.getWind({ x = p.x,
+      y = CIV.groundY(p) + SKC.openAGL / 2, z = p.z })
+    if w and w.x then wind = w end
+  end)
+  local ffTime = math.max(0, agl - SKC.openAGL) / SKC.freefallSpeed
+  local canopyTime = math.min(agl, SKC.openAGL) / SKC.canopySink
+  local drift = ffTime * SKC.freefallDrift + canopyTime
+  local lp = { x = p.x + wind.x * drift, z = p.z + wind.z * drift }
+
+  -- under canopy the jumpers steer back toward the DZ center
+  local center = { x = dz.center.x, z = dz.center.z }
+  local off = CIV.dist2D(lp, center)
+  if off > 0 then
+    local pull = math.min(SKC.steerM, off)
+    lp.x = lp.x + (center.x - lp.x) / off * pull
+    lp.z = lp.z + (center.z - lp.z) / off * pull
+  end
+  lp.y = land.getHeight({ x = lp.x, y = lp.z })
+
+  local playerName, dzName, dzRadius = info.playerName, dz.name, dz.radius or 300
+  CIV.msgUnit(u, SKC.jumpers .. " jumpers away over " .. dzName ..
+    "! Canopies in the air.", 10)
+  CIV.schedule(function()
+    local gname = CIV.spawnGround(lp, SKC.jumpers, C.templates.skydiver,
+      C.fallbackTypes.skydiver, "CIVIL_SKYDIVE")
+    local dist = math.floor(CIV.dist2D(lp, center) + 0.5)
+    local quality = math.max(0, 1 - dist / math.max(100, dzRadius))
+    CIV.Score.award(playerName, "skydive", quality, 0.5, 1,
+      string.format("skydive drop (%d m from center)", dist))
+    CIV.msgAll("SKYDIVE: the jumpers released by " .. playerName ..
+      " landed " .. dist .. " m from the center of " .. dzName .. ".", 12)
+    if gname then
+      CIV.schedule(function() CIV.despawnGroup(gname) end, nil, SKC.despawnDelay)
+    end
+  end, nil, math.max(1, ffTime + canopyTime))
+end
+
+----------------------------------------------------------------------
 -- MEDIA COVERAGE (passive)
 ----------------------------------------------------------------------
 
@@ -381,6 +643,8 @@ CIV.Menu_register(function(gid, uname)
   local sub = missionCommands.addSubMenuForGroup(gid, "Aviation tasks", CIV.rootMenu[gid])
   missionCommands.addCommandForGroup(gid, "Recon: report anomaly overhead",
     sub, reportAnomaly, uname)
+  missionCommands.addCommandForGroup(gid, "Skydive: release jumpers (over a drop zone)",
+    sub, SK.release, uname)
   missionCommands.addCommandForGroup(gid, "Active aviation tasks", sub, function()
     local n, txt = 0, "Active aviation tasks:\n"
     for _, a in pairs(RC._anomalies) do
@@ -393,11 +657,19 @@ CIV.Menu_register(function(gid, uname)
       txt = txt .. string.format("- VIP %s -> %s (%s)\n", job.from.name,
         job.to.name, job.state)
     end
+    for _, job in pairs(MT._jobs) do
+      n = n + 1
+      txt = txt .. string.format(
+        "- Medical transfer %s -> %s (%s, %d min left)\n", job.from.name,
+        job.to.name, job.state,
+        math.max(0, math.floor((job.deadline - timer.getTime()) / 60)))
+    end
     CIV.msgGroupId(gid, n > 0 and txt or "No active aviation tasks.", 20)
   end)
 end)
 
 CIV.EventStarters.recon = { label = "Recon anomaly", fn = function() return RC.start() end }
 CIV.EventStarters.vip = { label = "VIP shuttle", fn = function() return VP.start() end }
+CIV.EventStarters.transfer = { label = "Medical transfer", fn = function() return MT.start() end }
 
 CIV.log("CivilAviation loaded")

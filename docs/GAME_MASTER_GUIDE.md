@@ -48,6 +48,9 @@ civil cargo heavy 9    loading point: tier light/medium/heavy/heavy_lift,
 civil recon 6          corridor anomaly at the marker
 civil vip 7            passenger shuttle, pickup at the pad nearest to
                        the marker
+civil transfer 8       medical transfer (air ambulance): patient from the
+                       pad nearest to the marker to a distant pad, with a
+                       criticality clock
 ```
 
 What severity means for the players: 3 is a warm-up, 5 is standard, 7

@@ -21,7 +21,7 @@ Scripts/
                             hospital ships (shared rescue engine)
   30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
   40_CivilTransport.lua     Fixed mass tiers + supply airdrops
-  45_CivilAviation.lua      Infrastructure recon, VIP shuttle, media coverage
+  45_CivilAviation.lua      Recon, VIP shuttle, media, medical transfer, skydive
   50_CivilCommand.lua       Command center marker commands + session recap
 dist/
   CivilMissionTemplate.lua  Single-file build; regenerate with tools/build.sh
@@ -83,7 +83,8 @@ rescue reports name the specific region.
 | `CIVIL Cargo Point ...` | Transport | 3+ | loading points on flat ground |
 | `CIVIL Cargo Destination ...` | Transport | 1+ | delivery zone(s): sling loads and supply airdrops count in any of them |
 | `CIVIL Recon Point ...` | Aviation | 5+ | along a power line or pipeline; anomalies spawn on them, patrol the corridor low |
-| `CIVIL VIP Pad ...` | Aviation | 2+ | passenger shuttle helipads (pickup and destination are drawn from this pool) |
+| `CIVIL VIP Pad ...` | Aviation | 2+ | passenger shuttle helipads; the medical transfer legs use the same pool (pads on aprons give the job to the fixed-wing) |
+| `CIVIL Drop Zone ...` | Aviation | 0+ | skydive drop zones: release jumpers overhead via F10, score = landing accuracy |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -116,6 +117,7 @@ used when absent):**
 | `CIVIL Scene Standoff ...` | SWAT objective scene: cordon, cars | none (scene skipped) |
 | `CIVIL Anomaly ...` | recon corridor anomaly visual | none (logical anomaly) |
 | `CIVIL VIP ...` | waiting passenger visual | none (logical passenger) |
+| `CIVIL Skydiver ...` | landed jumpers | `Soldier M4` |
 
 **Building a template**: create a group of the right category (ground or
 ship), name the GROUP with the prefix, tick LATE ACTIVATION, place it
@@ -160,6 +162,25 @@ acceleration spikes cost you the tip) and passive media coverage (hold in
 the 1-3 km filming ring around any active event for 5 minutes and the
 story airs).
 
+**Medical transfer (air ambulance)**: an event CHAIN on the rescue module.
+When a severity 7+ patient reaches a hospital, there is a chance
+(`medTransfer.chance`, default 40%) the patient must continue to a regional
+hospital: a transfer job spawns from the VIP pad nearest the delivery to a
+pad at least 15 km away. Boarding works like the VIP shuttle, but a
+criticality clock ticks and the comfort threshold is tighter: the passenger
+is on a stretcher. Helicopters can take the leg, but pads on aprons plus
+the long distance make it the natural fixed-wing job. It can also be
+started manually (`civil transfer 8`, or the admin menu).
+
+**Skydive drops**: mark one or more `CIVIL Drop Zone` zones and the flying
+club is in business. Climb overhead, release the jumpers via F10 above
+800 m AGL, and the landing point is computed from the actual mission wind:
+damped drift in freefall, full drift under canopy, plus a small steer
+correction toward the center. The jumpers spawn where they land and the
+score is their distance from the zone center, so the pilot's job is
+reading the wind and picking the release point. Per-aircraft cooldown
+between drops.
+
 **Light fixed-wing (Bronco, MB-339, L-39, C-101, Yak-52, Christen
 Eagle...)** have a full job list: spotting works from ANY airplane (fire
 intel relay plus rescue identification, which pays spotter points), the
@@ -169,7 +190,16 @@ ATTACK role, like the real lead planes: they cannot haul retardant (the
 reload refuses their types), instead their F10 command smoke-marks the
 nearest fire from below 600 m. While the mark is hot (5 min), every drop
 on that fire scores +25%, and the marker earns the assist when the fire
-goes out. Types in `fire.airAttack`, TO VALIDATE per mod. A situation recap broadcasts every 30
+goes out. Types in `fire.airAttack`, TO VALIDATE per mod.
+
+Two more airplane jobs reward flying when nothing burns yet. **Firewatch**:
+sweeping a fire region that has no active fire keeps it watched for 15
+minutes; a fire igniting in a watched region is called in early, starts 2
+severity points smaller and credits the patrolling pilot. **Traffic
+watch**: on a police chase, an airplane orbiting over the fugitive (within
+1.2 km, below 1500 m) keeps the pursuit on camera: the helicopter's
+pressure builds 50% faster while the watch holds, and the watcher earns an
+assist when the arrest lands. A situation recap broadcasts every 30
 minutes, final standings at mission end; `tools/leaderboard.py` turns the
 logged SCORE lines into a cross-session ranking.
 
@@ -212,6 +242,7 @@ civil casevac             battlefield casualty, severity rolled randomly
 civil swat 7              SWAT objective there (needs ~7 operators)
 civil chase 9             fast two-car convoy from the nearest crossroad
 civil cargo heavy 9       urgent HEAVY load there (expires in ~45 min)
+civil transfer 8          medical transfer from the pad nearest the marker
 civil spawn survivor 3    clone 3 units of the "CIVIL Survivor" template
 civil spawn truck         one "CIVIL Fire Truck" group at the marker
 civil move alpha 12 road  send the group matching "alpha" there at 12 m/s

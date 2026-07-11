@@ -177,8 +177,35 @@ CIV.schedule(function(_, t)
           contact = true
         end
       end)
+
+      -- TRAFFIC WATCH: an airplane orbiting over the fugitive keeps the
+      -- pursuit on camera; while the watch holds, helicopter pressure
+      -- builds faster and the watcher earns an assist on the arrest
+      local TW = CP.trafficWatch
+      local watcher = nil
+      if TW.enabled then
+        CIV.forEachPlayer(function(a, info)
+          if watcher or info.category ~= Unit.Category.AIRPLANE then return end
+          if not a:inAir() then return end
+          local ap = a:getPoint()
+          if CIV.dist2D(ap, p) <= TW.radius and CIV.agl(ap) <= TW.maxAGL then
+            watcher = info
+          end
+        end)
+      end
+      if watcher then
+        chase.watcherName = watcher.playerName
+        if not chase.watchAnnounced then
+          chase.watchAnnounced = true
+          CIV.msgAll("TRAFFIC WATCH: " .. watcher.playerName ..
+            " is tracking the fugitive from above. Pressure builds " ..
+            "faster while the watch holds.", 12)
+        end
+      end
+
       if contact then
-        chase.pressure = math.min(100, chase.pressure + chase.rateUp * 2)   -- 2 s tick
+        chase.pressure = math.min(100,
+          chase.pressure + chase.rateUp * (watcher and TW.rateBonus or 1) * 2)   -- 2 s tick
       else
         chase.pressure = math.max(0, chase.pressure - chase.rateDown * 2)
       end
@@ -193,6 +220,10 @@ CIV.schedule(function(_, t)
         if closest then
           CIV.Score.award(closest.playerName, "chase", 0.8, 0.5,
             CIV.severityMult(chase.severity), "fugitive arrest")
+        end
+        if chase.watcherName then
+          CIV.Score.award(chase.watcherName, "trafficWatch", 0.8, 0.5,
+            CIV.severityMult(chase.severity), "traffic watch assist")
         end
         closeChase(chase, 90)
       else

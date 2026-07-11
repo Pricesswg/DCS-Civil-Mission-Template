@@ -462,6 +462,12 @@ CIV.schedule(function(_, t)
               elseif info then
                 CIV.Score.award(info.playerName, subj.scoreType,
                   subj.quality, subj.timeFactor, subj.mult or 1, subj.label)
+                -- event chain: a delivered high-severity patient sometimes
+                -- needs a second leg to a regional hospital (air ambulance,
+                -- see 45_CivilAviation). Guarded: the module is optional.
+                if CIV.MedTransfer then
+                  CIV.MedTransfer.maybeStart(subj.evt.severity, p)
+                end
               end
             end
             R._aboard[uname] = {}
