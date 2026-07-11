@@ -254,3 +254,16 @@ fallbacks in `docs/FEASIBILITY.md`.
 
 Zone/template scanning, polygon area support and several utilities are
 adapted from the 527th CSAR System by {527th} ienatom and {104WW} Price.
+
+## License
+
+This project is released under the **PolyForm Noncommercial License 1.0.0**
+(see the `LICENSE` file). You are free to use, modify and share it for any
+noncommercial purpose: personal missions, hobby squadrons, free community
+servers, training and study.
+
+**Use on paid servers is not covered.** Running this mission, or any work
+based on it, on pay-to-access servers, donation-gated slots or any other
+for-profit hosting requires a specific request to, and prior written
+authorization from, the repository owner (Pricesswg). If that is your case,
+open an issue on this repository and ask before deploying.
