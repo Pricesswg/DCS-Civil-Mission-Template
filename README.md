@@ -25,6 +25,9 @@ Scripts/
   50_CivilCommand.lua       Command center marker commands + session recap
 dist/
   CivilMissionTemplate.lua  Single-file build; regenerate with tools/build.sh
+missions/
+  Civil_Water_Template_Cyprus.miz  Test mission (Cyprus): zones and script
+                            already wired, used for in-game validation
 tools/build.sh              Concatenates Scripts/ into the single-file build
 tools/leaderboard.py        Cross-session leaderboard from dcs.log SCORE lines
 docs/
@@ -76,7 +79,7 @@ rescue reports name the specific region.
 | `CIVIL Vessel Spawn ...` | Rescue | 1+ | rescue-boat harbors, on water. Balance rule: distance to the SAR points / 9 m/s should be slightly LONGER than the hover window (default 25 min ~ 13.5 km) |
 | `CIVIL Medevac Point ...` | Rescue | 3+ | civilian casualty LZs (accidents, unsafe areas) |
 | `CIVIL Casevac Point ...` | Rescue | 3+ | battlefield extraction LZs. **User-built static areas**: dress them with your own battlefield assets |
-| `CIVIL Hospital ...` | Rescue | 1+ | on the actual hospital pads; delivery is ZONE-detected (still + low for 15 s), no FARP object needed. Auto-dressed with the medical-camp kit (`autoDress.hospitals = false` to disable) |
+| `CIVIL Hospital ...` | Rescue | 1+ | on the actual hospital pads; delivery is ZONE-detected (still + low for 15 s), no FARP object needed. NOT auto-dressed by default (real map hospitals come decorated); `autoDress.hospitals = true` adds the medical-camp kit on bare maps |
 | `CIVIL Police Point ...` | Police | 30-40 | ON real city crossroads, neighbor distance <= 1500 m (chase random walk) |
 | `CIVIL SWAT Base ...` | Police | 1+ | apron(s) where the helicopter can land to board the team |
 | `CIVIL SWAT Point ...` | Police | 3+ | rooftops / urban LZs (rooftop infantry spawn TO TEST) |
@@ -215,7 +218,7 @@ parameters derive, announced in every report ("MedEvac severity 8"):
 
 | Event | Severity drives |
 |---|---|
-| Wildfire | LIVE variable: grows on a per-fire cadence, spreads visually (1 effect -> cluster, capped at 5 for performance), suppressed by drops/trucks, 0 = out |
+| Wildfire | LIVE variable: grows on a per-fire cadence, adds smoke columns as it spreads (capped at 5 for performance); each column also grows small -> huge with time unattended (one step per 5 min) and shrinks a step when hit. Suppressed by drops/trucks, 0 = out |
 | SAR / MedEvac / CASEVAC | criticality deadline (severity 10 = -40%), hover window (less time) and required hover time (more), score |
 | Police chase | car speed, pressure build/decay rates, two-vehicle convoy at severity >= 8, score |
 | SWAT | operators required (4->8), squad boarded at the base is sized for the worst active scenario, resolve time, score |

@@ -34,7 +34,7 @@
 ----------------------------------------------------------------------
 
 CIV = CIV or {}
-CIV.VERSION = "0.2.0"
+CIV.VERSION = "0.3.0"
 
 ----------------------------------------------------------------------
 -- CONFIGURATION
@@ -108,12 +108,13 @@ CIV.Config = {
     skydiver   = "Soldier M4",
   },
 
-  -- Automatic scenery dressing of fixed zones. The C-130 reload and the
-  -- CASEVAC LZs are normally USER-BUILT static areas (you decorate them
-  -- yourself in the ME), so their auto-dressing is off by default.
+  -- Automatic scenery dressing of fixed zones. Everything is OFF by
+  -- default: the C-130 reload and the CASEVAC LZs are USER-BUILT static
+  -- areas, and hospital pads usually sit on real map hospitals that come
+  -- already dressed (set hospitals = true for a bare map).
   autoDress = {
     c130Reload = false,
-    hospitals  = true,
+    hospitals  = false,
     -- Extra assignments: dress any zone prefix with any kit from
     -- CIV.Dressing.kits (add your own kits there). Example:
     --   { prefix = "CIVIL Refugee Camp", kit = "refugee_camp" },
@@ -237,6 +238,18 @@ CIV.Config = {
       max        = 10,
       growEvery  = { min = 300, max = 900 },  -- s per +1 severity, randomized ONCE per fire
       maxEffects = 5,                          -- simultaneous smoke/fire effects cap
+    },
+
+    -- Visual progression: every smoke/fire column starts SMALL and
+    -- escalates one preset step (small -> medium -> large -> huge) for
+    -- every escalateEvery seconds it goes unattended. Severity decides how
+    -- MANY columns burn, the age of each column decides how BIG it looks:
+    -- an ignored fire visibly takes hold even before severity grows. A
+    -- suppression hit knocks every column back one step, so drops read on
+    -- the fire immediately.
+    visuals = {
+      escalateEvery  = 300,   -- s per size step (small at 0, huge at 15 min)
+      knockbackOnHit = true,  -- water/retardant hit shrinks the columns one step
     },
 
     heloDropSeverity = 2.0,     -- severity removed per helicopter water drop
@@ -1838,12 +1851,32 @@ CIV.schedule(function()
   for _, prefix in pairs({ z.firePoints, z.fireStations, z.waterPoints, z.sarMountainPoints,
       z.sarSeaPoints, z.policePoints, z.swatPoints, z.cargoPoints,
       z.medevacPoints, z.casevacPoints, z.hospitals, z.vesselSpawn,
-      z.reconPoints, z.vipPads }) do
+      z.reconPoints, z.vipPads, z.dropZones }) do
     CIV.Pool.load(prefix)
   end
 end, nil, 3)
 
-CIV.msgAll("Civil Mission Template v" .. CIV.VERSION .. " loaded.\nMenu: F10 -> Civil Missions", 20)
+-- Startup banner, visible to EVERYONE (outText, not coalition-bound, so
+-- spectators and GM slots see it too): an immediate "initializing" line
+-- the moment the core runs, then a READY summary once every DO SCRIPT
+-- FILE action has executed, listing which modules actually loaded.
+pcall(trigger.action.outText,
+  "Civil Mission Template v" .. CIV.VERSION .. ": initializing...", 10)
+
+CIV.schedule(function()
+  local mods = {}
+  if CIV.Fire then mods[#mods + 1] = "Firefighting" end
+  if CIV.Rescue then mods[#mods + 1] = "Rescue" end
+  if CIV.Police then mods[#mods + 1] = "Police/SWAT" end
+  if CIV.Cargo then mods[#mods + 1] = "Transport" end
+  if CIV.Recon then mods[#mods + 1] = "Aviation" end
+  if CIV.Command then mods[#mods + 1] = "Command center" end
+  pcall(trigger.action.outText,
+    "Civil Mission Template v" .. CIV.VERSION .. " READY.\nModules: " ..
+    (#mods > 0 and table.concat(mods, ", ") or "core only") ..
+    ".\nRadio menu: F10 -> Civil Missions.", 20)
+end, nil, 10)
+
 CIV.log("CivilCore " .. CIV.VERSION .. " loaded")
 
 -- ====================================================================
@@ -1881,10 +1914,12 @@ local CF = C.fire
 ----------------------------------------------------------------------
 -- FIRE ZONE MANAGER (severity model)
 -- Every fire carries a severity from 1 to 10, rolled at ignition and
--- growing on a per-fire randomized cadence. Visuals scale with severity:
--- a small fire is a single smoke/fire effect; as it grows, sub-fires
--- light up around the anchor (capped at severity.maxEffects simultaneous
--- effects for performance; effect SIZE keeps scaling past the cap).
+-- growing on a per-fire randomized cadence. Severity drives the column
+-- COUNT (sub-fires light up around the anchor, capped at
+-- severity.maxEffects for performance); each column's SIZE grows with its
+-- own age (small -> medium -> large -> huge, one step per
+-- visuals.escalateEvery seconds unattended), so an ignored fire visibly
+-- takes hold and a suppression hit visibly knocks it back.
 -- Suppression (helicopter drops, C-130 line/airdrop, fire trucks on
 -- scene) subtracts severity; at 0 the fire is out.
 ----------------------------------------------------------------------
@@ -1900,9 +1935,15 @@ local coordinationBonus                       -- defined in the C-130 section
 local regionPatrols = {}
 
 -- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL, 5..8 = thick smoke
--- only (used by smokeOnly fire kinds such as a landfill fire)
-local function presetFor(severity, kindDef)
-  local preset = math.max(1, math.min(4, math.ceil(severity / 2.5)))
+-- only (used by smokeOnly fire kinds such as a landfill fire).
+-- Every column starts SMALL and escalates one step per visuals.escalateEvery
+-- seconds it goes unattended (age-based progression: small at ignition,
+-- huge after 15 minutes with the defaults). Severity controls the column
+-- COUNT, age controls the column SIZE.
+local function presetFor(effect, kindDef)
+  local age = timer.getTime() - effect.bornAt
+  local preset = math.max(1, math.min(4,
+    1 + math.floor(age / CF.visuals.escalateEvery)))
   if kindDef and kindDef.smokeOnly then preset = preset + 4 end
   return preset
 end
@@ -1928,20 +1969,23 @@ end
 -- change. Each effect keeps a stable random offset inside the fire zone.
 local function refreshVisuals(fire)
   local wanted = effectCountFor(fire.severity)
-  local preset = presetFor(fire.severity, fire.kindDef)
   for i = #fire.effects + 1, wanted do
     local p = fire.point
     if i > 1 then
       p = CIV.offsetPoint(fire.point, math.random(0, 359),
         math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
     end
-    fire.effects[i] = { point = p, name = fire.smokeName .. "_" .. i, preset = 0 }
+    -- a NEW column starts small and ages on its own clock, same
+    -- progression as the first one
+    fire.effects[i] = { point = p, name = fire.smokeName .. "_" .. i,
+                        preset = 0, bornAt = timer.getTime() }
   end
   for i = #fire.effects, wanted + 1, -1 do
     trigger.action.effectSmokeStop(fire.effects[i].name)
     fire.effects[i] = nil
   end
   for _, eff in ipairs(fire.effects) do
+    local preset = presetFor(eff, fire.kindDef)
     if eff.preset ~= preset then
       if eff.preset ~= 0 then trigger.action.effectSmokeStop(eff.name) end
       eff.preset = preset
@@ -2049,6 +2093,15 @@ function Fire.applyWater(point, amount, byWhom)
       if fire.severity <= 0 then
         extinguish(fire, byWhom)
       else
+        -- the hit knocks every column back one size step: the drop reads
+        -- on the fire immediately (aging the columns forward again takes
+        -- another escalateEvery unattended)
+        if CF.visuals.knockbackOnHit then
+          local now = timer.getTime()
+          for _, eff in ipairs(fire.effects) do
+            eff.bornAt = math.min(now, eff.bornAt + CF.visuals.escalateEvery)
+          end
+        end
         refreshVisuals(fire)
       end
       return fire
@@ -2065,12 +2118,14 @@ CIV.schedule(function(_, t)
     if now >= fire.nextGrow and fire.severity < SEV.max then
       fire.severity = math.min(SEV.max, fire.severity + 1)
       fire.nextGrow = now + fire.growEvery
-      refreshVisuals(fire)
       if fire.severity >= SEV.max then
         CIV.msgAll("Fire at " .. fire.pt.name ..
           " is RAGING (severity 10/10): all assets required.", 15)
       end
     end
+    -- age-based column escalation ticks here even without severity
+    -- changes; cheap, effects only restart when a preset step is crossed
+    refreshVisuals(fire)
   end
   if now >= nextIgnition then
     Fire.igniteRandom()

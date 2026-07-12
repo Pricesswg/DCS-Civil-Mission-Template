@@ -79,7 +79,7 @@ in any destination zone.
 | `CIVIL Cargo Destination ...` | cargo delivery | one or more destination zones; deliveries and supply airdrops count in any of them |
 | `CIVIL Medevac Point ...` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point ...` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
-| `CIVIL Hospital ...` | hospital pads | on the actual pad; auto-dressed with the medical camp kit (`autoDress.hospitals = false` to disable); delivery is ZONE-detected (still+low), no FARP needed |
+| `CIVIL Hospital ...` | hospital pads | on the actual pad; delivery is ZONE-detected (still+low), no FARP needed. NOT auto-dressed: real map hospitals (e.g. Syria) come already decorated. Set `autoDress.hospitals = true` for the medical camp kit on a bare map |
 | `CIVIL Vessel Spawn ...` | rescue boat harbors | on open water near a harbor. BALANCE RULE: place them so that distance / boat speed (9 m/s ~ 17.5 kts) is slightly LONGER than the sea SAR hover window (default 25 min ~ 13.5 km): the boat is the second chance, not a competitor to the helicopter |
 
 Prefixes are configurable in `CIV.Config.zones` (top of `01_CivilCore.lua`).
@@ -160,7 +160,8 @@ apron, CASEVAC LZs): nothing to configure, the script never touches them.
 center, defined in `CIV.Dressing.kits` in `01_CivilCore.lua` (each entry
 is `{ type = "FARP Tent", dx = 15, dy = 0, heading = 0 }`: type names from
 the ME statics list, offsets in meters). Assign kits to zones with
-`autoDress` (hospitals get the medical camp by default) or add your own
+`autoDress` (everything off by default: real map hospitals are already
+decorated) or add your own
 pairs in `autoDress.custom = { { prefix = "CIVIL Refugee Camp", kit =
 "refugee_camp" } }`. (3) SPAWNED GROUPS: anything that must appear at
 runtime (scenes, subjects, teams) comes from the late-activated `CIVIL ...`
@@ -223,8 +224,9 @@ At the top of `01_CivilCore.lua` (`CIV.Config`):
 - `hover.*`: T times / windows per operation type.
 - `rescue.intel`: approximate-circle radius and the spotter detection range
   used to release exact rescue coordinates.
-- `autoDress`: which fixed zones get automatic scenery (reload apron off by
-  default: user-built; hospital pads on by default).
+- `autoDress`: which fixed zones get automatic scenery. ALL off by
+  default: the reload apron and CASEVAC LZs are user-built, and hospital
+  pads usually sit on real map hospitals that come already dressed.
 - `fire.severity` / `fire.trucks`: fire growth pacing, effect cap, brigade
   size/speed/suppression rate.
 - `director`: probabilities/intervals of automatic event generation (or
@@ -272,11 +274,14 @@ mission resumes AUTOMATIC mode by itself after
 
 - **Session leaderboard**: shared live score.
 - **Firefighting**: water pickup / drop / active fires (with severity and
-  brigade status). Fires carry a severity 1-10: they spawn small (single
-  effect), grow on a random per-fire cadence and spread visually (more
-  smoke/fire effects, capped for performance). Fire trucks roll out of the
-  nearest station automatically and suppress from the ground once on scene,
-  reducing the air passes needed.
+  brigade status). Fires carry a severity 1-10 that drives how many smoke
+  columns burn (capped for performance); each column starts SMALL and
+  escalates one size step (small, medium, large, huge) every
+  `fire.visuals.escalateEvery` seconds it goes unattended, so an ignored
+  fire is visibly taking hold within 15 minutes. A suppression hit knocks
+  the columns back one step. Fire trucks roll out of the nearest station
+  automatically and suppress from the ground once on scene, reducing the
+  air passes needed.
 - **Firefighting C-130**: loading is opt-in: taking off clean and orbiting
   as spotter/rescue support needs no interaction. `Load retardant` at the
   reload zone starts a 2-minute hold (moving aborts it), then `Start line

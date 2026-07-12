@@ -24,7 +24,7 @@
 ----------------------------------------------------------------------
 
 CIV = CIV or {}
-CIV.VERSION = "0.2.0"
+CIV.VERSION = "0.3.0"
 
 ----------------------------------------------------------------------
 -- CONFIGURATION
@@ -98,12 +98,13 @@ CIV.Config = {
     skydiver   = "Soldier M4",
   },
 
-  -- Automatic scenery dressing of fixed zones. The C-130 reload and the
-  -- CASEVAC LZs are normally USER-BUILT static areas (you decorate them
-  -- yourself in the ME), so their auto-dressing is off by default.
+  -- Automatic scenery dressing of fixed zones. Everything is OFF by
+  -- default: the C-130 reload and the CASEVAC LZs are USER-BUILT static
+  -- areas, and hospital pads usually sit on real map hospitals that come
+  -- already dressed (set hospitals = true for a bare map).
   autoDress = {
     c130Reload = false,
-    hospitals  = true,
+    hospitals  = false,
     -- Extra assignments: dress any zone prefix with any kit from
     -- CIV.Dressing.kits (add your own kits there). Example:
     --   { prefix = "CIVIL Refugee Camp", kit = "refugee_camp" },
@@ -227,6 +228,18 @@ CIV.Config = {
       max        = 10,
       growEvery  = { min = 300, max = 900 },  -- s per +1 severity, randomized ONCE per fire
       maxEffects = 5,                          -- simultaneous smoke/fire effects cap
+    },
+
+    -- Visual progression: every smoke/fire column starts SMALL and
+    -- escalates one preset step (small -> medium -> large -> huge) for
+    -- every escalateEvery seconds it goes unattended. Severity decides how
+    -- MANY columns burn, the age of each column decides how BIG it looks:
+    -- an ignored fire visibly takes hold even before severity grows. A
+    -- suppression hit knocks every column back one step, so drops read on
+    -- the fire immediately.
+    visuals = {
+      escalateEvery  = 300,   -- s per size step (small at 0, huge at 15 min)
+      knockbackOnHit = true,  -- water/retardant hit shrinks the columns one step
     },
 
     heloDropSeverity = 2.0,     -- severity removed per helicopter water drop
@@ -1828,10 +1841,30 @@ CIV.schedule(function()
   for _, prefix in pairs({ z.firePoints, z.fireStations, z.waterPoints, z.sarMountainPoints,
       z.sarSeaPoints, z.policePoints, z.swatPoints, z.cargoPoints,
       z.medevacPoints, z.casevacPoints, z.hospitals, z.vesselSpawn,
-      z.reconPoints, z.vipPads }) do
+      z.reconPoints, z.vipPads, z.dropZones }) do
     CIV.Pool.load(prefix)
   end
 end, nil, 3)
 
-CIV.msgAll("Civil Mission Template v" .. CIV.VERSION .. " loaded.\nMenu: F10 -> Civil Missions", 20)
+-- Startup banner, visible to EVERYONE (outText, not coalition-bound, so
+-- spectators and GM slots see it too): an immediate "initializing" line
+-- the moment the core runs, then a READY summary once every DO SCRIPT
+-- FILE action has executed, listing which modules actually loaded.
+pcall(trigger.action.outText,
+  "Civil Mission Template v" .. CIV.VERSION .. ": initializing...", 10)
+
+CIV.schedule(function()
+  local mods = {}
+  if CIV.Fire then mods[#mods + 1] = "Firefighting" end
+  if CIV.Rescue then mods[#mods + 1] = "Rescue" end
+  if CIV.Police then mods[#mods + 1] = "Police/SWAT" end
+  if CIV.Cargo then mods[#mods + 1] = "Transport" end
+  if CIV.Recon then mods[#mods + 1] = "Aviation" end
+  if CIV.Command then mods[#mods + 1] = "Command center" end
+  pcall(trigger.action.outText,
+    "Civil Mission Template v" .. CIV.VERSION .. " READY.\nModules: " ..
+    (#mods > 0 and table.concat(mods, ", ") or "core only") ..
+    ".\nRadio menu: F10 -> Civil Missions.", 20)
+end, nil, 10)
+
 CIV.log("CivilCore " .. CIV.VERSION .. " loaded")

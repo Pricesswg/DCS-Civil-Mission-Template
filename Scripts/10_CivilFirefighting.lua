@@ -30,10 +30,12 @@ local CF = C.fire
 ----------------------------------------------------------------------
 -- FIRE ZONE MANAGER (severity model)
 -- Every fire carries a severity from 1 to 10, rolled at ignition and
--- growing on a per-fire randomized cadence. Visuals scale with severity:
--- a small fire is a single smoke/fire effect; as it grows, sub-fires
--- light up around the anchor (capped at severity.maxEffects simultaneous
--- effects for performance; effect SIZE keeps scaling past the cap).
+-- growing on a per-fire randomized cadence. Severity drives the column
+-- COUNT (sub-fires light up around the anchor, capped at
+-- severity.maxEffects for performance); each column's SIZE grows with its
+-- own age (small -> medium -> large -> huge, one step per
+-- visuals.escalateEvery seconds unattended), so an ignored fire visibly
+-- takes hold and a suppression hit visibly knocks it back.
 -- Suppression (helicopter drops, C-130 line/airdrop, fire trucks on
 -- scene) subtracts severity; at 0 the fire is out.
 ----------------------------------------------------------------------
@@ -49,9 +51,15 @@ local coordinationBonus                       -- defined in the C-130 section
 local regionPatrols = {}
 
 -- effectSmokeBig presets: 1..4 = smoke+fire S/M/L/XL, 5..8 = thick smoke
--- only (used by smokeOnly fire kinds such as a landfill fire)
-local function presetFor(severity, kindDef)
-  local preset = math.max(1, math.min(4, math.ceil(severity / 2.5)))
+-- only (used by smokeOnly fire kinds such as a landfill fire).
+-- Every column starts SMALL and escalates one step per visuals.escalateEvery
+-- seconds it goes unattended (age-based progression: small at ignition,
+-- huge after 15 minutes with the defaults). Severity controls the column
+-- COUNT, age controls the column SIZE.
+local function presetFor(effect, kindDef)
+  local age = timer.getTime() - effect.bornAt
+  local preset = math.max(1, math.min(4,
+    1 + math.floor(age / CF.visuals.escalateEvery)))
   if kindDef and kindDef.smokeOnly then preset = preset + 4 end
   return preset
 end
@@ -77,20 +85,23 @@ end
 -- change. Each effect keeps a stable random offset inside the fire zone.
 local function refreshVisuals(fire)
   local wanted = effectCountFor(fire.severity)
-  local preset = presetFor(fire.severity, fire.kindDef)
   for i = #fire.effects + 1, wanted do
     local p = fire.point
     if i > 1 then
       p = CIV.offsetPoint(fire.point, math.random(0, 359),
         math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
     end
-    fire.effects[i] = { point = p, name = fire.smokeName .. "_" .. i, preset = 0 }
+    -- a NEW column starts small and ages on its own clock, same
+    -- progression as the first one
+    fire.effects[i] = { point = p, name = fire.smokeName .. "_" .. i,
+                        preset = 0, bornAt = timer.getTime() }
   end
   for i = #fire.effects, wanted + 1, -1 do
     trigger.action.effectSmokeStop(fire.effects[i].name)
     fire.effects[i] = nil
   end
   for _, eff in ipairs(fire.effects) do
+    local preset = presetFor(eff, fire.kindDef)
     if eff.preset ~= preset then
       if eff.preset ~= 0 then trigger.action.effectSmokeStop(eff.name) end
       eff.preset = preset
@@ -198,6 +209,15 @@ function Fire.applyWater(point, amount, byWhom)
       if fire.severity <= 0 then
         extinguish(fire, byWhom)
       else
+        -- the hit knocks every column back one size step: the drop reads
+        -- on the fire immediately (aging the columns forward again takes
+        -- another escalateEvery unattended)
+        if CF.visuals.knockbackOnHit then
+          local now = timer.getTime()
+          for _, eff in ipairs(fire.effects) do
+            eff.bornAt = math.min(now, eff.bornAt + CF.visuals.escalateEvery)
+          end
+        end
         refreshVisuals(fire)
       end
       return fire
@@ -214,12 +234,14 @@ CIV.schedule(function(_, t)
     if now >= fire.nextGrow and fire.severity < SEV.max then
       fire.severity = math.min(SEV.max, fire.severity + 1)
       fire.nextGrow = now + fire.growEvery
-      refreshVisuals(fire)
       if fire.severity >= SEV.max then
         CIV.msgAll("Fire at " .. fire.pt.name ..
           " is RAGING (severity 10/10): all assets required.", 15)
       end
     end
+    -- age-based column escalation ticks here even without severity
+    -- changes; cheap, effects only restart when a preset step is crossed
+    refreshVisuals(fire)
   end
   if now >= nextIgnition then
     Fire.igniteRandom()
