@@ -26,8 +26,8 @@ hovering over a water point, the C-130 reloads retardant on the ground and
 drops it in a line run at 150-250 m AGL, or airdrops retardant drums.
 Forest fires burn bright; a landfill fire is a slow dark smoke column; an
 industrial fire grows fast. The report tells you which one you are facing.
-Read the smoke: a fresh column is small and towers within 15 minutes if
-nobody works it, and every good hit visibly knocks it back down a size.
+Read the smoke: a fresh column is small and towers in about 20 minutes
+if nobody works it, and every good hit visibly knocks it back a size.
 
 SEARCH AND RESCUE (mountain and sea). A subject is reported with a ROUGH
 position and an approximate search circle on the F10 map. The exact

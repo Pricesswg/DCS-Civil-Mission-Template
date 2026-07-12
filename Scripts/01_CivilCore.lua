@@ -238,7 +238,7 @@ CIV.Config = {
     -- suppression hit knocks every column back one step, so drops read on
     -- the fire immediately.
     visuals = {
-      escalateEvery  = 300,   -- s per size step (small at 0, huge at 15 min)
+      escalateEvery  = 450,   -- s per size step (small at 0, huge at ~22 min)
       knockbackOnHit = true,  -- water/retardant hit shrinks the columns one step
     },
 
@@ -262,7 +262,9 @@ CIV.Config = {
     trucks = {
       enabled        = true,
       count          = 2,      -- trucks per fire
-      speed          = 14,     -- m/s route speed (~50 km/h)
+      speed          = 20,     -- m/s route speed (~72 km/h): real maps are big
+                               -- and real fire stations are far, the trucks
+                               -- run with sirens on
       suppressRadius = 250,    -- m from the fire to count as "on scene"
       suppressPerMin = 0.6,    -- severity removed per minute while on scene
     },

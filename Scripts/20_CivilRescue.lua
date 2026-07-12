@@ -380,6 +380,11 @@ function R.startEvent(key, opts)
       CIV.msgUnit(unit, def.label .. ": subject ABOARD. Deliver to a " ..
         "hospital pad (" .. C.zones.hospitals .. " zones): hold low and " ..
         "still for " .. C.rescue.delivery.holdSeconds .. " seconds.", 20)
+      local pinfo = CIV.players[unit:getName()]
+      if pinfo then
+        CIV.msgAll(def.label .. ": " .. pinfo.playerName ..
+          " has the subject ABOARD, inbound to the hospital.", 10)
+      end
     end,
     onFail = function()
       -- Sea events with vessels en route are NOT lost yet: the event stays

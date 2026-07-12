@@ -253,6 +253,9 @@ CIV.schedule(function(_, t)
               CIV.msgUnit(u, "Passenger aboard. Destination: " .. job.to.name ..
                 "\n" .. CIV.coordText(job.to.point) ..
                 "\nKeep it smooth: hard maneuvers cost you the tip.", 20)
+              CIV.msgAll("VIP SHUTTLE: " .. info.playerName ..
+                " picked up the passenger at " .. job.from.name ..
+                ", bound for " .. job.to.name .. ".", 10)
             end
           else
             job.boardTimer[info.unitName] = nil
@@ -424,6 +427,8 @@ CIV.schedule(function(_, t)
                 "\n" .. CIV.coordText(job.to.point) ..
                 "\nCriticality: " .. math.max(0,
                   math.floor((job.deadline - now) / 60)) .. " minutes.", 20)
+              CIV.msgAll("MEDICAL TRANSFER: " .. info.playerName ..
+                " has the patient aboard, bound for " .. job.to.name .. ".", 10)
             end
           else
             job.boardTimer[info.unitName] = nil

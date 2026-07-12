@@ -218,7 +218,7 @@ parameters derive, announced in every report ("MedEvac severity 8"):
 
 | Event | Severity drives |
 |---|---|
-| Wildfire | LIVE variable: grows on a per-fire cadence, adds smoke columns as it spreads (capped at 5 for performance); each column also grows small -> huge with time unattended (one step per 5 min) and shrinks a step when hit. Suppressed by drops/trucks, 0 = out |
+| Wildfire | LIVE variable: grows on a per-fire cadence, adds smoke columns as it spreads (capped at 5 for performance); each column also grows small -> huge with time unattended (one step per 7.5 min) and shrinks a step when hit. Suppressed by drops/trucks, 0 = out |
 | SAR / MedEvac / CASEVAC | criticality deadline (severity 10 = -40%), hover window (less time) and required hover time (more), score |
 | Police chase | car speed, pressure build/decay rates, two-vehicle convoy at severity >= 8, score |
 | SWAT | operators required (4->8), squad boarded at the base is sized for the worst active scenario, resolve time, score |

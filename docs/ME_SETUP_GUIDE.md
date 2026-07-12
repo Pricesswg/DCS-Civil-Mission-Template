@@ -277,8 +277,9 @@ mission resumes AUTOMATIC mode by itself after
   brigade status). Fires carry a severity 1-10 that drives how many smoke
   columns burn (capped for performance); each column starts SMALL and
   escalates one size step (small, medium, large, huge) every
-  `fire.visuals.escalateEvery` seconds it goes unattended, so an ignored
-  fire is visibly taking hold within 15 minutes. A suppression hit knocks
+  `fire.visuals.escalateEvery` seconds it goes unattended (default 7.5
+  minutes per step), so an ignored fire is visibly taking hold within 20
+  minutes. A suppression hit knocks
   the columns back one step. Fire trucks roll out of the nearest station
   automatically and suppress from the ground once on scene, reducing the
   air passes needed.

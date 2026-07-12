@@ -54,7 +54,7 @@ local regionPatrols = {}
 -- only (used by smokeOnly fire kinds such as a landfill fire).
 -- Every column starts SMALL and escalates one step per visuals.escalateEvery
 -- seconds it goes unattended (age-based progression: small at ignition,
--- huge after 15 minutes with the defaults). Severity controls the column
+-- huge after ~22 minutes with the defaults). Severity controls the column
 -- COUNT, age controls the column SIZE.
 local function presetFor(effect, kindDef)
   local age = timer.getTime() - effect.bornAt
@@ -394,6 +394,11 @@ local function startWaterPickup(uname)
         st.water = true
         CIV.msgUnit(unit, "Water loaded. Fly to an active fire and use " ..
           "F10 -> Civil Missions -> Firefighting -> Drop water.", 15)
+        local info2 = CIV.players[uname]
+        if info2 then
+          CIV.msgAll("FIREFIGHTING: " .. info2.playerName ..
+            " loaded water at " .. pt.name .. " and is inbound to the fires.", 10)
+        end
       end
     end,
     onFail = function()
@@ -403,6 +408,11 @@ local function startWaterPickup(uname)
   })
   CIV.msgUnit(u, "Hold your hover over the pickup point (" ..
     hp.minAGL .. "-" .. hp.maxAGL .. " m AGL).", 10)
+  local info = CIV.players[uname]
+  if info then
+    CIV.msgAll("FIREFIGHTING: " .. info.playerName ..
+      " is picking up water at " .. pt.name .. ".", 8)
+  end
 end
 
 local function dropWater(uname)
@@ -536,6 +546,10 @@ local function loadRetardant(uname)
   st.loading = true
   CIV.msgUnit(u, "Loading retardant drums: stay put for " ..
     CF.c130ReloadTime .. " seconds.", 12)
+  if info then
+    CIV.msgAll("FIREFIGHTING: C-130 " .. info.playerName ..
+      " is loading retardant at the apron.", 10)
+  end
   CIV.schedule(function()
     st.loading = false
     local u2 = Unit.getByName(uname)
@@ -548,6 +562,11 @@ local function loadRetardant(uname)
     CIV.msgUnit(u2, "Retardant loaded. Drop: F10 -> Civil Missions -> " ..
       "Firefighting C-130 -> Start line drop (altitude " ..
       CF.c130DropAGL.min .. "-" .. CF.c130DropAGL.max .. " m AGL).", 15)
+    local info2 = CIV.players[uname]
+    if info2 then
+      CIV.msgAll("FIREFIGHTING: " .. info2.playerName ..
+        " has retardant aboard, tanker ready.", 10)
+    end
   end, nil, CF.c130ReloadTime)
 end
 
@@ -576,6 +595,11 @@ local function startLineDrop(uname)
   st.dropRun = { endTime = timer.getTime() + CF.c130DropSeconds, hits = 0, maxSev = 1 }
   CIV.msgUnit(u, "DROP IN PROGRESS: hold heading and altitude for " ..
     CF.c130DropSeconds .. " seconds.", 10)
+  local info = CIV.players[uname]
+  if info then
+    CIV.msgAll("FIREFIGHTING: C-130 " .. info.playerName ..
+      " is running a retardant line drop.", 8)
+  end
 end
 
 -- line drop tick: applies retardant along the flight path

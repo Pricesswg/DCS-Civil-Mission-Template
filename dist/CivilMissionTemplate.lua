@@ -248,7 +248,7 @@ CIV.Config = {
     -- suppression hit knocks every column back one step, so drops read on
     -- the fire immediately.
     visuals = {
-      escalateEvery  = 300,   -- s per size step (small at 0, huge at 15 min)
+      escalateEvery  = 450,   -- s per size step (small at 0, huge at ~22 min)
       knockbackOnHit = true,  -- water/retardant hit shrinks the columns one step
     },
 
@@ -272,7 +272,9 @@ CIV.Config = {
     trucks = {
       enabled        = true,
       count          = 2,      -- trucks per fire
-      speed          = 14,     -- m/s route speed (~50 km/h)
+      speed          = 20,     -- m/s route speed (~72 km/h): real maps are big
+                               -- and real fire stations are far, the trucks
+                               -- run with sirens on
       suppressRadius = 250,    -- m from the fire to count as "on scene"
       suppressPerMin = 0.6,    -- severity removed per minute while on scene
     },
@@ -1938,7 +1940,7 @@ local regionPatrols = {}
 -- only (used by smokeOnly fire kinds such as a landfill fire).
 -- Every column starts SMALL and escalates one step per visuals.escalateEvery
 -- seconds it goes unattended (age-based progression: small at ignition,
--- huge after 15 minutes with the defaults). Severity controls the column
+-- huge after ~22 minutes with the defaults). Severity controls the column
 -- COUNT, age controls the column SIZE.
 local function presetFor(effect, kindDef)
   local age = timer.getTime() - effect.bornAt
@@ -2278,6 +2280,11 @@ local function startWaterPickup(uname)
         st.water = true
         CIV.msgUnit(unit, "Water loaded. Fly to an active fire and use " ..
           "F10 -> Civil Missions -> Firefighting -> Drop water.", 15)
+        local info2 = CIV.players[uname]
+        if info2 then
+          CIV.msgAll("FIREFIGHTING: " .. info2.playerName ..
+            " loaded water at " .. pt.name .. " and is inbound to the fires.", 10)
+        end
       end
     end,
     onFail = function()
@@ -2287,6 +2294,11 @@ local function startWaterPickup(uname)
   })
   CIV.msgUnit(u, "Hold your hover over the pickup point (" ..
     hp.minAGL .. "-" .. hp.maxAGL .. " m AGL).", 10)
+  local info = CIV.players[uname]
+  if info then
+    CIV.msgAll("FIREFIGHTING: " .. info.playerName ..
+      " is picking up water at " .. pt.name .. ".", 8)
+  end
 end
 
 local function dropWater(uname)
@@ -2420,6 +2432,10 @@ local function loadRetardant(uname)
   st.loading = true
   CIV.msgUnit(u, "Loading retardant drums: stay put for " ..
     CF.c130ReloadTime .. " seconds.", 12)
+  if info then
+    CIV.msgAll("FIREFIGHTING: C-130 " .. info.playerName ..
+      " is loading retardant at the apron.", 10)
+  end
   CIV.schedule(function()
     st.loading = false
     local u2 = Unit.getByName(uname)
@@ -2432,6 +2448,11 @@ local function loadRetardant(uname)
     CIV.msgUnit(u2, "Retardant loaded. Drop: F10 -> Civil Missions -> " ..
       "Firefighting C-130 -> Start line drop (altitude " ..
       CF.c130DropAGL.min .. "-" .. CF.c130DropAGL.max .. " m AGL).", 15)
+    local info2 = CIV.players[uname]
+    if info2 then
+      CIV.msgAll("FIREFIGHTING: " .. info2.playerName ..
+        " has retardant aboard, tanker ready.", 10)
+    end
   end, nil, CF.c130ReloadTime)
 end
 
@@ -2460,6 +2481,11 @@ local function startLineDrop(uname)
   st.dropRun = { endTime = timer.getTime() + CF.c130DropSeconds, hits = 0, maxSev = 1 }
   CIV.msgUnit(u, "DROP IN PROGRESS: hold heading and altitude for " ..
     CF.c130DropSeconds .. " seconds.", 10)
+  local info = CIV.players[uname]
+  if info then
+    CIV.msgAll("FIREFIGHTING: C-130 " .. info.playerName ..
+      " is running a retardant line drop.", 8)
+  end
 end
 
 -- line drop tick: applies retardant along the flight path
@@ -3083,6 +3109,11 @@ function R.startEvent(key, opts)
       CIV.msgUnit(unit, def.label .. ": subject ABOARD. Deliver to a " ..
         "hospital pad (" .. C.zones.hospitals .. " zones): hold low and " ..
         "still for " .. C.rescue.delivery.holdSeconds .. " seconds.", 20)
+      local pinfo = CIV.players[unit:getName()]
+      if pinfo then
+        CIV.msgAll(def.label .. ": " .. pinfo.playerName ..
+          " has the subject ABOARD, inbound to the hospital.", 10)
+      end
     end,
     onFail = function()
       -- Sea events with vessels en route are NOT lost yet: the event stays
@@ -3753,6 +3784,11 @@ local function boardTeam(uname)
     st.squad = boardingSize()
     CIV.msgUnit(u2, "SWAT team aboard: " .. st.squad ..
       " operators. Insert them on the active objective via fast-rope.", 15)
+    local info = CIV.players[uname]
+    if info then
+      CIV.msgAll("SWAT: " .. info.playerName .. " boarded a team of " ..
+        st.squad .. " operators.", 10)
+    end
   end, nil, CS.boardingTime)
 end
 
@@ -4461,6 +4497,9 @@ CIV.schedule(function(_, t)
               CIV.msgUnit(u, "Passenger aboard. Destination: " .. job.to.name ..
                 "\n" .. CIV.coordText(job.to.point) ..
                 "\nKeep it smooth: hard maneuvers cost you the tip.", 20)
+              CIV.msgAll("VIP SHUTTLE: " .. info.playerName ..
+                " picked up the passenger at " .. job.from.name ..
+                ", bound for " .. job.to.name .. ".", 10)
             end
           else
             job.boardTimer[info.unitName] = nil
@@ -4632,6 +4671,8 @@ CIV.schedule(function(_, t)
                 "\n" .. CIV.coordText(job.to.point) ..
                 "\nCriticality: " .. math.max(0,
                   math.floor((job.deadline - now) / 60)) .. " minutes.", 20)
+              CIV.msgAll("MEDICAL TRANSFER: " .. info.playerName ..
+                " has the patient aboard, bound for " .. job.to.name .. ".", 10)
             end
           else
             job.boardTimer[info.unitName] = nil

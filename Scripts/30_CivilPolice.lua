@@ -319,6 +319,11 @@ local function boardTeam(uname)
     st.squad = boardingSize()
     CIV.msgUnit(u2, "SWAT team aboard: " .. st.squad ..
       " operators. Insert them on the active objective via fast-rope.", 15)
+    local info = CIV.players[uname]
+    if info then
+      CIV.msgAll("SWAT: " .. info.playerName .. " boarded a team of " ..
+        st.squad .. " operators.", 10)
+    end
   end, nil, CS.boardingTime)
 end
 
