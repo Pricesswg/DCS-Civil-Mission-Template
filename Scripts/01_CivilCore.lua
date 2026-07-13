@@ -69,6 +69,10 @@ CIV.Config = {
     reconPoints       = "CIVIL Recon Point",          -- inspection corridor waypoints (anomalies spawn on them)
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
     dropZones         = "CIVIL Drop Zone",            -- skydive drop zones (score = distance from center)
+    seaSpawn          = "CIVIL Sea Spawn",            -- merchant traffic: route start zones (random point inside)
+    seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
+    seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
+    restricted        = "CIVIL Restricted",           -- military areas closed to civil traffic (intercept tasks)
   },
 
   ------------------------------------------------------------------
@@ -87,6 +91,8 @@ CIV.Config = {
     anomaly  = "CIVIL Anomaly",    -- ground group: recon corridor anomaly (optional visual)
     vip      = "CIVIL VIP",        -- ground group: waiting passenger (optional visual)
     skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
+    merchant = "CIVIL Merchant",   -- ship group: sea traffic freighter
+    airliner = "CIVIL Airliner",   -- plane group: ambient air traffic (type/livery source)
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -96,6 +102,8 @@ CIV.Config = {
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
     fireTruck  = "HEMTT TFFT",     -- stock airfield fire truck, TO VALIDATE
     skydiver   = "Soldier M4",
+    merchant   = "HandyWind",      -- stock bulk freighter, TO VALIDATE type name
+    airliner   = "Yak-40",         -- stock small airliner (ambient traffic)
   },
 
   -- Automatic scenery dressing of fixed zones. Everything is OFF by
@@ -152,6 +160,8 @@ CIV.Config = {
       trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
       firewatch   = 5,      -- fire spotted early by a preventive patrol
       skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
+      coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
+      intercept   = 14,     -- restricted-area violator identified and escorted out
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -510,7 +520,9 @@ CIV.Config = {
       transport   = 40,
       recon       = 20,
       vip         = 20,
-      -- fires have their own dedicated scheduler (fire.autoIgnite)
+      inspection  = 20,
+      -- fires have their own dedicated scheduler (fire.autoIgnite);
+      -- sea/air ambient traffic have their own spawn schedulers too
     },
   },
 
@@ -589,6 +601,87 @@ CIV.Config = {
     steerM        = 150,    -- m the jumpers steer back toward the DZ center
     cooldown      = 180,    -- s per aircraft between drops
     despawnDelay  = 300,    -- s the landed jumpers stay on the ground
+  },
+
+  -- Task board: aviation tasks (recon, VIP, medical transfer) are not
+  -- pushed on the pilots. The director POSTS OFFERS and whoever is ready
+  -- accepts one via F10 (maybe you are refueling, or mid-task: nothing is
+  -- assigned to you). Offers pre-roll their severity so the board shows
+  -- the expected points; PRIORITY offers pay a bonus. GM marker commands
+  -- bypass the board on purpose: the commander wants the event NOW.
+  taskBoard = {
+    enabled        = true,
+    maxOffers      = 4,     -- offers on the board at once (also F10 accept slots)
+    offerTtl       = 1500,  -- s an unclaimed offer stays posted
+    priorityChance = 30,    -- % an offer is flagged PRIORITY
+    priorityBonus  = 1.3,   -- score multiplier carried by priority offers
+  },
+
+  ------------------------------------------------------------------
+  -- Sea operations (47_CivilSeaOps.lua): merchant traffic on lanes plus
+  -- the coast guard inspection task.
+  ------------------------------------------------------------------
+  seaOps = {
+    -- Merchant traffic: ships spawn at a random point inside a CIVIL Sea
+    -- Spawn zone (staggered: two ships on the same spot explode), sail a
+    -- local random walk over the CIVIL Sea Lane waypoint pool (same walk
+    -- as the police chase) and end in a CIVIL Sea Despawn zone, where
+    -- they are cleared. Scenic on its own, target pool for the coast
+    -- guard.
+    traffic = {
+      enabled        = true,
+      maxActive      = 3,
+      spawnEvery     = { min = 600, max = 1500 },  -- s between spawn attempts
+      speed          = 7,       -- m/s (~14 kts)
+      laneHops       = 3,       -- lane waypoints per route
+      neighborRadius = 60000,   -- m, "nearby lanes" for the random walk
+      arriveRadius   = 800,     -- m from the route end = arrived, cleared
+      minSpawnGap    = 400,     -- m between ships inside the spawn zone
+      maxLifetime    = 10800,   -- s hard cleanup for stuck ships
+    },
+    -- Coast guard: helicopter inspection. Fly alongside the merchant (low,
+    -- slow, close) to check the manifest. Clean pays a partial score; a
+    -- SUSPICIOUS cargo escalates: the ship runs, the helicopter keeps
+    -- track of it until the patrol boat arrives and boards (full score to
+    -- the inspecting pilot).
+    coastGuard = {
+      enabled       = true,
+      severity      = { min = 1, max = 10 },
+      suspectChance = 35,      -- % the inspected ship carries suspicious cargo
+      inspect = { radius = 200, maxRelAlt = 80, maxRelSpeed = 8, seconds = 45 },
+      track   = { radius = 3000, graceSeconds = 180 },  -- lose contact this long = ship slips away
+      boatHold = { radius = 300, seconds = 60 },        -- patrol boat alongside = boarding
+      fleeSpeed = 10,          -- m/s a suspect runs at
+    },
+  },
+
+  ------------------------------------------------------------------
+  -- Ambient air traffic (46_CivilAirTraffic.lua): AI civil flights
+  -- between the map airports, purely scenic, plus the restricted-area
+  -- violation task for the military flights.
+  ------------------------------------------------------------------
+  airTraffic = {
+    enabled    = true,
+    maxActive  = 6,        -- simultaneous AI flights (keep it in the 5-10 range)
+    spawnEvery = { min = 240, max = 720 },
+    altitude   = { min = 2500, max = 5500 },   -- m cruise band
+    speed      = { min = 120, max = 170 },     -- m/s cruise
+    minLegKm   = 30,       -- minimum airport-to-airport leg
+    airports   = {},       -- explicit airdrome names; empty = every airdrome on the map
+    excludeAirports = {},  -- airdromes never used (e.g. the player bases)
+    maxLifetime = 3600,    -- s hard cleanup per flight
+    -- Restricted areas: sometimes a flight strays into a CIVIL Restricted
+    -- zone and loiters there. The violation is armed only when a player
+    -- airplane is airborne to answer it (requirePlayers); intercept =
+    -- fly within radius of the violator for the required seconds. If
+    -- nobody intercepts in time, ATC diverts the flight out by itself.
+    restricted = {
+      enabled         = true,
+      violationChance = 20,     -- % per spawned flight
+      requirePlayers  = true,   -- no airborne player airplane = no violation
+      intercept       = { radius = 500, seconds = 30 },
+      divertAfter     = 600,    -- s before the self-divert
+    },
   },
 
   -- Media coverage: any player helicopter holding in the filming ring
@@ -693,6 +786,7 @@ CIV.Config = {
       transport = { border = { 0, 0.8, 0, 0.8 },   fill = { 0, 0.8, 0, 0.10 } },
       swat      = { border = { 0.6, 0, 0.8, 0.8 }, fill = { 0.6, 0, 0.8, 0.10 } },
       chase     = { border = { 0, 0.4, 1, 0.8 },   fill = { 0, 0.4, 1, 0.10 } },
+      restricted= { border = { 1, 0.2, 0, 0.8 },   fill = { 1, 0.2, 0, 0.10 } },
     },
   },
 }
@@ -1357,6 +1451,11 @@ function CIV.spawnCargo(p, cargoType, kg, namePrefix)
   })
   return name
 end
+
+-- public id accessors for modules that build their own group data
+-- (e.g. the ambient air traffic spawns airplane groups directly)
+function CIV.newGroupId() return nextGroupId() end
+function CIV.newUnitId() return nextUnitId() end
 
 function CIV.despawnGroup(gname)
   local g = Group.getByName(gname)

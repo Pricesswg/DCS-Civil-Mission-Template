@@ -21,7 +21,10 @@ Scripts/
                             hospital ships (shared rescue engine)
   30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
   40_CivilTransport.lua     Fixed mass tiers + supply airdrops
-  45_CivilAviation.lua      Recon, VIP shuttle, media, medical transfer, skydive
+  45_CivilAviation.lua      Recon, VIP shuttle, media, medical transfer,
+                            skydive, aviation task board
+  46_CivilAirTraffic.lua    Ambient AI civil flights + restricted-area intercepts
+  47_CivilSeaOps.lua        Merchant traffic on sea lanes + coast guard inspections
   50_CivilCommand.lua       Command center marker commands + session recap
 dist/
   CivilMissionTemplate.lua  Single-file build; regenerate with tools/build.sh
@@ -88,6 +91,10 @@ rescue reports name the specific region.
 | `CIVIL Recon Point ...` | Aviation | 5+ | along a power line or pipeline; anomalies spawn on them, patrol the corridor low |
 | `CIVIL VIP Pad ...` | Aviation | 2+ | passenger shuttle helipads; the medical transfer legs use the same pool (pads on aprons give the job to the fixed-wing) |
 | `CIVIL Drop Zone ...` | Aviation | 0+ | skydive drop zones: release jumpers overhead via F10, score = landing accuracy |
+| `CIVIL Sea Spawn ...` | Sea ops | 1+ | merchant route START: ships appear at a random point inside (staggered so they never overlap) |
+| `CIVIL Sea Lane ...` | Sea ops | 2+ | route waypoints: ships walk nearby lanes like the police chase walks crossroads |
+| `CIVIL Sea Despawn ...` | Sea ops | 1+ | merchant route END: ships are cleared on arrival |
+| `CIVIL Restricted ...` | Air traffic | 0+ | military areas closed to civil traffic; strayed flights loiter inside until intercepted |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -121,6 +128,8 @@ used when absent):**
 | `CIVIL Anomaly ...` | recon corridor anomaly visual | none (logical anomaly) |
 | `CIVIL VIP ...` | waiting passenger visual | none (logical passenger) |
 | `CIVIL Skydiver ...` | landed jumpers | `Soldier M4` |
+| `CIVIL Merchant ...` | sea traffic freighter | `HandyWind` |
+| `CIVIL Airliner ...` | ambient air traffic (type + livery source) | `Yak-40` |
 
 **Building a template**: create a group of the right category (ground or
 ship), name the GROUP with the prefix, tick LATE ACTIVATION, place it
@@ -174,6 +183,41 @@ criticality clock ticks and the comfort threshold is tighter: the passenger
 is on a stretcher. Helicopters can take the leg, but pads on aprons plus
 the long distance make it the natural fixed-wing job. It can also be
 started manually (`civil transfer 8`, or the admin menu).
+
+**Task board (pilot-called aviation tasks)**: recon, VIP shuttle and
+medical transfer are not pushed on the pilots. The director posts OFFERS
+and whoever is ready accepts one via `F10 -> Aviation tasks -> Task board`
+(maybe you are refueling or mid-task: nothing gets assigned to you). Each
+offer shows severity, expected points and time left; offers flagged
+PRIORITY carry a +30% score bonus. Unclaimed offers expire quietly. GM
+marker commands bypass the board on purpose, and the MedEvac transfer
+chain stays direct: that patient already exists and his clock is ticking.
+Set `taskBoard.enabled = false` to go back to pushed tasks.
+
+**Sea traffic and coast guard** (`47_CivilSeaOps.lua`): merchant ships
+spawn at a random point inside a `CIVIL Sea Spawn` zone, sail a local
+random walk over the `CIVIL Sea Lane` waypoints and are cleared in a
+`CIVIL Sea Despawn` zone, so you control exactly where routes start, run
+and end. On top of that traffic runs the COAST GUARD task (helicopters):
+fly alongside the reported merchant, low and slow, to check the manifest.
+A clean manifest pays a partial score; suspicious cargo escalates: the
+ship runs for it, you keep track of it (3 km) and a patrol boat launches
+from the nearest `CIVIL Vessel Spawn` harbor to board it. Full score to
+the inspecting pilot on the boarding, task failed if contact stays lost
+too long.
+
+**Ambient air traffic** (`46_CivilAirTraffic.lua`): AI civil flights
+between the map airdromes keep the sky alive, capped at
+`airTraffic.maxActive` (default 6, keep it in the 5-10 range). Flights
+spawn airborne out of the departure field and land at the destination;
+type and livery come from the optional `CIVIL Airliner` templates (Civil
+Aircraft Mod types work well). Sometimes a flight strays into a `CIVIL
+Restricted` zone and loiters: the AIRSPACE ALERT intercept task goes to
+the military flights (fly within 500 m of the violator for 30 s to
+identify and escort it out, `score.base.intercept` points). The violation
+is armed only when a player airplane is airborne to answer it; if nobody
+intercepts in time, ATC diverts the flight out by itself and the alert
+closes with no points.
 
 **Skydive drops**: mark one or more `CIVIL Drop Zone` zones and the flying
 club is in business. Climb overhead, release the jumpers via F10 above
@@ -246,6 +290,10 @@ civil swat 7              SWAT objective there (needs ~7 operators)
 civil chase 9             fast two-car convoy from the nearest crossroad
 civil cargo heavy 9       urgent HEAVY load there (expires in ~45 min)
 civil transfer 8          medical transfer from the pad nearest the marker
+civil inspect 7           coast guard inspection on the merchant nearest
+                          the marker
+civil ship                extra merchant on the sea lanes
+civil flight              extra ambient civil flight
 civil spawn survivor 3    clone 3 units of the "CIVIL Survivor" template
 civil spawn truck         one "CIVIL Fire Truck" group at the marker
 civil move alpha 12 road  send the group matching "alpha" there at 12 m/s

@@ -103,6 +103,16 @@ vector matches the mission weather (some weather presets report calm winds
 at low altitude); with zero wind the jumpers simply land where released,
 which still plays fine.
 
+**Ambient traffic (v0.4)**: the merchant lane system reuses the chase's
+random-walk routing on ship waypoints, no new API risk beyond the
+`HandyWind` fallback type name (TO VALIDATE per map). The air traffic
+module is the risky one and needs in-game validation: dynamically spawned
+AIRPLANE groups (payload table accepted, `Land` waypoint honored, AI
+actually lands and shuts down), plus the loiter re-kick cadence on the
+restricted-area violators. Everything is wrapped in pcall and the module
+caps itself, so a failure degrades to "no ambient traffic" without
+touching the rest.
+
 ## Corrections / clarifications vs the concept
 
 - **`world.setPersistenceHandler`**: I found NO evidence this exists as a

@@ -51,7 +51,16 @@ civil vip 7            passenger shuttle, pickup at the pad nearest to
 civil transfer 8       medical transfer (air ambulance): patient from the
                        pad nearest to the marker to a distant pad, with a
                        criticality clock
+civil inspect 7        coast guard inspection on the merchant nearest to
+                       the marker (needs merchant traffic at sea)
+civil ship             extra merchant ship on the sea lanes
+civil flight           extra ambient civil flight between the airports
 ```
+
+Note on the aviation tasks: recon, VIP and transfer started by the
+DIRECTOR go on the task board as offers the pilots accept via F10. Your
+marker commands bypass the board and start the event immediately: use
+them when you want something to happen NOW.
 
 What severity means for the players: 3 is a warm-up, 5 is standard, 7
 needs a competent crew, 9-10 is an all-hands emergency with a short clock.

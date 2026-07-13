@@ -79,6 +79,10 @@ CIV.Config = {
     reconPoints       = "CIVIL Recon Point",          -- inspection corridor waypoints (anomalies spawn on them)
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
     dropZones         = "CIVIL Drop Zone",            -- skydive drop zones (score = distance from center)
+    seaSpawn          = "CIVIL Sea Spawn",            -- merchant traffic: route start zones (random point inside)
+    seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
+    seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
+    restricted        = "CIVIL Restricted",           -- military areas closed to civil traffic (intercept tasks)
   },
 
   ------------------------------------------------------------------
@@ -97,6 +101,8 @@ CIV.Config = {
     anomaly  = "CIVIL Anomaly",    -- ground group: recon corridor anomaly (optional visual)
     vip      = "CIVIL VIP",        -- ground group: waiting passenger (optional visual)
     skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
+    merchant = "CIVIL Merchant",   -- ship group: sea traffic freighter
+    airliner = "CIVIL Airliner",   -- plane group: ambient air traffic (type/livery source)
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -106,6 +112,8 @@ CIV.Config = {
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
     fireTruck  = "HEMTT TFFT",     -- stock airfield fire truck, TO VALIDATE
     skydiver   = "Soldier M4",
+    merchant   = "HandyWind",      -- stock bulk freighter, TO VALIDATE type name
+    airliner   = "Yak-40",         -- stock small airliner (ambient traffic)
   },
 
   -- Automatic scenery dressing of fixed zones. Everything is OFF by
@@ -162,6 +170,8 @@ CIV.Config = {
       trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
       firewatch   = 5,      -- fire spotted early by a preventive patrol
       skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
+      coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
+      intercept   = 14,     -- restricted-area violator identified and escorted out
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -520,7 +530,9 @@ CIV.Config = {
       transport   = 40,
       recon       = 20,
       vip         = 20,
-      -- fires have their own dedicated scheduler (fire.autoIgnite)
+      inspection  = 20,
+      -- fires have their own dedicated scheduler (fire.autoIgnite);
+      -- sea/air ambient traffic have their own spawn schedulers too
     },
   },
 
@@ -599,6 +611,87 @@ CIV.Config = {
     steerM        = 150,    -- m the jumpers steer back toward the DZ center
     cooldown      = 180,    -- s per aircraft between drops
     despawnDelay  = 300,    -- s the landed jumpers stay on the ground
+  },
+
+  -- Task board: aviation tasks (recon, VIP, medical transfer) are not
+  -- pushed on the pilots. The director POSTS OFFERS and whoever is ready
+  -- accepts one via F10 (maybe you are refueling, or mid-task: nothing is
+  -- assigned to you). Offers pre-roll their severity so the board shows
+  -- the expected points; PRIORITY offers pay a bonus. GM marker commands
+  -- bypass the board on purpose: the commander wants the event NOW.
+  taskBoard = {
+    enabled        = true,
+    maxOffers      = 4,     -- offers on the board at once (also F10 accept slots)
+    offerTtl       = 1500,  -- s an unclaimed offer stays posted
+    priorityChance = 30,    -- % an offer is flagged PRIORITY
+    priorityBonus  = 1.3,   -- score multiplier carried by priority offers
+  },
+
+  ------------------------------------------------------------------
+  -- Sea operations (47_CivilSeaOps.lua): merchant traffic on lanes plus
+  -- the coast guard inspection task.
+  ------------------------------------------------------------------
+  seaOps = {
+    -- Merchant traffic: ships spawn at a random point inside a CIVIL Sea
+    -- Spawn zone (staggered: two ships on the same spot explode), sail a
+    -- local random walk over the CIVIL Sea Lane waypoint pool (same walk
+    -- as the police chase) and end in a CIVIL Sea Despawn zone, where
+    -- they are cleared. Scenic on its own, target pool for the coast
+    -- guard.
+    traffic = {
+      enabled        = true,
+      maxActive      = 3,
+      spawnEvery     = { min = 600, max = 1500 },  -- s between spawn attempts
+      speed          = 7,       -- m/s (~14 kts)
+      laneHops       = 3,       -- lane waypoints per route
+      neighborRadius = 60000,   -- m, "nearby lanes" for the random walk
+      arriveRadius   = 800,     -- m from the route end = arrived, cleared
+      minSpawnGap    = 400,     -- m between ships inside the spawn zone
+      maxLifetime    = 10800,   -- s hard cleanup for stuck ships
+    },
+    -- Coast guard: helicopter inspection. Fly alongside the merchant (low,
+    -- slow, close) to check the manifest. Clean pays a partial score; a
+    -- SUSPICIOUS cargo escalates: the ship runs, the helicopter keeps
+    -- track of it until the patrol boat arrives and boards (full score to
+    -- the inspecting pilot).
+    coastGuard = {
+      enabled       = true,
+      severity      = { min = 1, max = 10 },
+      suspectChance = 35,      -- % the inspected ship carries suspicious cargo
+      inspect = { radius = 200, maxRelAlt = 80, maxRelSpeed = 8, seconds = 45 },
+      track   = { radius = 3000, graceSeconds = 180 },  -- lose contact this long = ship slips away
+      boatHold = { radius = 300, seconds = 60 },        -- patrol boat alongside = boarding
+      fleeSpeed = 10,          -- m/s a suspect runs at
+    },
+  },
+
+  ------------------------------------------------------------------
+  -- Ambient air traffic (46_CivilAirTraffic.lua): AI civil flights
+  -- between the map airports, purely scenic, plus the restricted-area
+  -- violation task for the military flights.
+  ------------------------------------------------------------------
+  airTraffic = {
+    enabled    = true,
+    maxActive  = 6,        -- simultaneous AI flights (keep it in the 5-10 range)
+    spawnEvery = { min = 240, max = 720 },
+    altitude   = { min = 2500, max = 5500 },   -- m cruise band
+    speed      = { min = 120, max = 170 },     -- m/s cruise
+    minLegKm   = 30,       -- minimum airport-to-airport leg
+    airports   = {},       -- explicit airdrome names; empty = every airdrome on the map
+    excludeAirports = {},  -- airdromes never used (e.g. the player bases)
+    maxLifetime = 3600,    -- s hard cleanup per flight
+    -- Restricted areas: sometimes a flight strays into a CIVIL Restricted
+    -- zone and loiters there. The violation is armed only when a player
+    -- airplane is airborne to answer it (requirePlayers); intercept =
+    -- fly within radius of the violator for the required seconds. If
+    -- nobody intercepts in time, ATC diverts the flight out by itself.
+    restricted = {
+      enabled         = true,
+      violationChance = 20,     -- % per spawned flight
+      requirePlayers  = true,   -- no airborne player airplane = no violation
+      intercept       = { radius = 500, seconds = 30 },
+      divertAfter     = 600,    -- s before the self-divert
+    },
   },
 
   -- Media coverage: any player helicopter holding in the filming ring
@@ -703,6 +796,7 @@ CIV.Config = {
       transport = { border = { 0, 0.8, 0, 0.8 },   fill = { 0, 0.8, 0, 0.10 } },
       swat      = { border = { 0.6, 0, 0.8, 0.8 }, fill = { 0.6, 0, 0.8, 0.10 } },
       chase     = { border = { 0, 0.4, 1, 0.8 },   fill = { 0, 0.4, 1, 0.10 } },
+      restricted= { border = { 1, 0.2, 0, 0.8 },   fill = { 1, 0.2, 0, 0.10 } },
     },
   },
 }
@@ -1367,6 +1461,11 @@ function CIV.spawnCargo(p, cargoType, kg, namePrefix)
   })
   return name
 end
+
+-- public id accessors for modules that build their own group data
+-- (e.g. the ambient air traffic spawns airplane groups directly)
+function CIV.newGroupId() return nextGroupId() end
+function CIV.newUnitId() return nextUnitId() end
 
 function CIV.despawnGroup(gname)
   local g = Group.getByName(gname)
@@ -4306,6 +4405,7 @@ function RC.start(opts)
     or CIV.rollSeverity(CR.severity)
   local anomaly = {
     id = RC._aid, pt = pt, point = pt.point, severity = sev,
+    scoreBonus = (opts and opts.scoreBonus) or 1,   -- task-board priority bonus
     expiresAt = timer.getTime() + CR.ttl,
     startedAt = timer.getTime(),
     hinted = {},
@@ -4359,7 +4459,8 @@ local function reportAnomaly(uname)
         local timeFactor = math.max(0,
           1 - (timer.getTime() - anomaly.startedAt) / CR.ttl)
         CIV.Score.award(info.playerName, "recon", 0.8, timeFactor,
-          CIV.severityMult(anomaly.severity), "anomaly reported")
+          CIV.severityMult(anomaly.severity) * (anomaly.scoreBonus or 1),
+          "anomaly reported")
       end
       CIV.msgAll("RECON: anomaly at " .. anomaly.pt.name ..
         " identified and reported. Maintenance is on the way.", 15)
@@ -4439,6 +4540,7 @@ function VP.start(opts)
     severity = (opts and opts.severity)
       and math.max(1, math.min(10, opts.severity))
       or CIV.rollSeverity(CV.severity),
+    scoreBonus = (opts and opts.scoreBonus) or 1,   -- task-board priority bonus
     expiresAt = timer.getTime() + CV.pickupTtl,
     state = "waiting", unitName = nil,
     penalty = 0, lastVel = nil, lastComplaint = 0,
@@ -4536,7 +4638,7 @@ CIV.schedule(function(_, t)
             local quality = math.max(0, 1 - job.penalty)
             if info then
               CIV.Score.award(info.playerName, "vip", quality, 0.5,
-                CIV.severityMult(job.severity),
+                CIV.severityMult(job.severity) * (job.scoreBonus or 1),
                 string.format("VIP shuttle (comfort %d%%)", math.floor(quality * 100)))
             end
             CIV.msgAll("VIP SHUTTLE: passenger delivered to " .. job.to.name ..
@@ -4600,6 +4702,7 @@ function MT.start(opts)
     or CIV.rollSeverity({ min = CT.minSeverity, max = 10 })
   local job = {
     id = MT._tid, from = from, to = dest, severity = sev,
+    scoreBonus = opts.scoreBonus or 1,   -- task-board priority bonus
     deadline = timer.getTime()
       + CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
     deadlineTotal = CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
@@ -4709,7 +4812,7 @@ CIV.schedule(function(_, t)
             local timeFactor = math.max(0, (job.deadline - now) / job.deadlineTotal)
             if info then
               CIV.Score.award(info.playerName, "medTransfer", quality, timeFactor,
-                CIV.severityMult(job.severity),
+                CIV.severityMult(job.severity) * (job.scoreBonus or 1),
                 string.format("medical transfer (comfort %d%%)",
                   math.floor(quality * 100)))
             end
@@ -4885,6 +4988,124 @@ if CM.enabled then
 end
 
 ----------------------------------------------------------------------
+-- TASK BOARD (pilot-called aviation tasks)
+-- Recon, VIP and medical transfer are not pushed on the pilots anymore:
+-- the director POSTS OFFERS and whoever is ready accepts one via F10
+-- (maybe you are refueling, or mid-task: nothing gets assigned to you).
+-- Offers pre-roll severity so the board shows the expected points, and
+-- PRIORITY offers carry a score bonus. GM marker commands bypass the
+-- board on purpose: the commander wants the event NOW. The MedEvac chain
+-- also stays direct: that patient already exists and his clock is
+-- ticking.
+----------------------------------------------------------------------
+
+CIV.TaskBoard = { _offers = {}, _oid = 0 }
+local TB = CIV.TaskBoard
+local CB = C.taskBoard
+
+local offerKinds = {
+  recon    = { label = "Recon anomaly", scoreKey = "recon",
+               start = function(o) return RC.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+  vip      = { label = "VIP shuttle", scoreKey = "vip",
+               start = function(o) return VP.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+  transfer = { label = "Medical transfer", scoreKey = "medTransfer",
+               start = function(o) return MT.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+}
+
+local function offerCount()
+  local n = 0
+  for _ in pairs(TB._offers) do n = n + 1 end
+  return n
+end
+
+function TB.post(kind)
+  local k = offerKinds[kind]
+  if not k then return nil end
+  if not CB.enabled then
+    -- board disabled in config: fall back to the old push behavior
+    return k.start({ severity = nil, bonus = 1 })
+  end
+  if offerCount() >= CB.maxOffers then return nil end
+  TB._oid = TB._oid + 1
+  local offer = {
+    id = TB._oid, kind = kind, label = k.label,
+    severity = kind == "transfer"
+      and CIV.rollSeverity({ min = C.medTransfer.minSeverity, max = 10 })
+      or CIV.rollSeverity(),
+    priority = math.random(100) <= CB.priorityChance,
+    expiresAt = timer.getTime() + CB.offerTtl,
+  }
+  offer.bonus = offer.priority and CB.priorityBonus or 1
+  offer.points = CIV.Score.compute(k.scoreKey, 0.8, 0.5,
+    CIV.severityMult(offer.severity) * offer.bonus)
+  TB._offers[offer.id] = offer
+  CIV.msgAll("TASK BOARD: new " .. (offer.priority and "PRIORITY " or "") ..
+    "offer: " .. offer.label .. ", severity " .. offer.severity ..
+    "/10, about " .. offer.points .. " pts" ..
+    (offer.priority and (" (includes the +" ..
+      math.floor((CB.priorityBonus - 1) * 100) .. "% priority bonus)") or "") ..
+    ".\nAccept it via F10 -> Aviation tasks -> Task board.", 15)
+  return offer
+end
+
+local function sortedOffers()
+  local list = {}
+  for _, o in pairs(TB._offers) do list[#list + 1] = o end
+  table.sort(list, function(a, b) return a.id < b.id end)
+  return list
+end
+
+local function listOffers(gid)
+  local list = sortedOffers()
+  if #list == 0 then
+    CIV.msgGroupId(gid, "The task board is empty.", 10)
+    return
+  end
+  local txt = "TASK BOARD (accept by slot number):\n"
+  for i, o in ipairs(list) do
+    txt = txt .. string.format("%d. %s%s  severity %d/10  ~%d pts  %d min left\n",
+      i, o.priority and "[PRIORITY] " or "", o.label, o.severity, o.points,
+      math.max(0, math.floor((o.expiresAt - timer.getTime()) / 60)))
+  end
+  CIV.msgGroupId(gid, txt, 25)
+end
+
+function TB.accept(slot, uname)
+  local u = Unit.getByName(uname)
+  local offer = sortedOffers()[slot]
+  if not offer then
+    if u then CIV.msgUnit(u, "No offer in slot " .. slot ..
+      ": check the board first.", 8) end
+    return
+  end
+  TB._offers[offer.id] = nil
+  local started = offerKinds[offer.kind].start(offer)
+  local info = CIV.players[uname]
+  if started then
+    CIV.msgAll("TASK BOARD: '" .. offer.label .. "' accepted" ..
+      (info and (" by " .. info.playerName) or "") .. ". Task is live.", 10)
+  elseif u then
+    CIV.msgUnit(u, "The offer could not start (missing zones or cap " ..
+      "reached). It has been taken off the board.", 10)
+  end
+end
+
+-- offer expiry
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for id, offer in pairs(TB._offers) do
+    if now > offer.expiresAt then
+      TB._offers[id] = nil
+      CIV.log("Task board: offer '" .. offer.label .. "' expired unclaimed")
+    end
+  end
+  return t + 30
+end, nil, 30)
+
+----------------------------------------------------------------------
 -- F10 MENU + EVENT STARTERS
 ----------------------------------------------------------------------
 
@@ -4894,6 +5115,14 @@ CIV.Menu_register(function(gid, uname)
     sub, reportAnomaly, uname)
   missionCommands.addCommandForGroup(gid, "Skydive: release jumpers (over a drop zone)",
     sub, SK.release, uname)
+  if CB.enabled then
+    local board = missionCommands.addSubMenuForGroup(gid, "Task board", sub)
+    missionCommands.addCommandForGroup(gid, "List offers", board, listOffers, gid)
+    for slot = 1, math.min(CB.maxOffers, 6) do
+      missionCommands.addCommandForGroup(gid, "Accept offer " .. slot, board,
+        function() TB.accept(slot, uname) end)
+    end
+  end
   missionCommands.addCommandForGroup(gid, "Active aviation tasks", sub, function()
     local n, txt = 0, "Active aviation tasks:\n"
     for _, a in pairs(RC._anomalies) do
@@ -4917,11 +5146,727 @@ CIV.Menu_register(function(gid, uname)
   end)
 end)
 
-CIV.EventStarters.recon = { label = "Recon anomaly", fn = function() return RC.start() end }
-CIV.EventStarters.vip = { label = "VIP shuttle", fn = function() return VP.start() end }
-CIV.EventStarters.transfer = { label = "Medical transfer", fn = function() return MT.start() end }
+-- the director and the admin menu post OFFERS on the board (pilot-called
+-- tasks); with taskBoard.enabled = false TB.post falls back to direct starts
+CIV.EventStarters.recon = { label = "Recon anomaly (board offer)",
+  fn = function() return TB.post("recon") end }
+CIV.EventStarters.vip = { label = "VIP shuttle (board offer)",
+  fn = function() return TB.post("vip") end }
+CIV.EventStarters.transfer = { label = "Medical transfer (board offer)",
+  fn = function() return TB.post("transfer") end }
 
 CIV.log("CivilAviation loaded")
+
+-- ====================================================================
+-- >>> Scripts/46_CivilAirTraffic.lua
+-- ====================================================================
+----------------------------------------------------------------------
+-- DCS Civil Mission Template - Ambient air traffic
+-- File: 46_CivilAirTraffic.lua  (requires 01_CivilCore.lua; load after
+-- the other intervention files, before 50_CivilCommand.lua)
+--
+--   TRAFFIC: AI civil flights between the map airports, purely scenic
+--   (the map feels alive). Flights spawn airborne a few km out of the
+--   departure airdrome, cruise, and LAND at the destination, where they
+--   are cleared after shutdown. Type and livery come from the optional
+--   "CIVIL Airliner" template (Civil Aircraft Mod types work well),
+--   fallback Yak-40. Hard cap on simultaneous flights.
+--
+--   RESTRICTED AREAS: sometimes a flight strays into a "CIVIL Restricted"
+--   zone and loiters there. The violation is armed only if a player
+--   airplane is airborne to answer it: intercept = fly within the
+--   configured radius of the violator for the required seconds, then it
+--   is escorted out and the interceptor is paid. If nobody intercepts in
+--   time, ATC diverts the flight out by itself, no points for anyone.
+----------------------------------------------------------------------
+
+assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
+
+local C = CIV.Config
+local AT = C.airTraffic
+local RS = AT.restricted
+
+CIV.AirTraffic = { _flights = {}, _fid = 0 }
+local AIR = CIV.AirTraffic
+
+----------------------------------------------------------------------
+-- AIRPORT LIST
+----------------------------------------------------------------------
+
+local airbaseCache
+local function airports()
+  if airbaseCache then return airbaseCache end
+  airbaseCache = {}
+  local ok, list = pcall(world.getAirbases)
+  if not ok or type(list) ~= "table" then return airbaseCache end
+  local exclude = {}
+  for _, n in ipairs(AT.excludeAirports) do exclude[n] = true end
+  local only = nil
+  if #AT.airports > 0 then
+    only = {}
+    for _, n in ipairs(AT.airports) do only[n] = true end
+  end
+  local airdromeCat = (Airbase and Airbase.Category and Airbase.Category.AIRDROME) or 0
+  for _, ab in ipairs(list) do
+    local okAll, entry = pcall(function()
+      return { name = ab:getName(), id = ab:getID(), point = ab:getPoint(),
+               cat = ab:getDesc().category }
+    end)
+    if okAll and entry and entry.cat == airdromeCat
+       and not exclude[entry.name] and (not only or only[entry.name]) then
+      airbaseCache[#airbaseCache + 1] = entry
+    end
+  end
+  CIV.log("Air traffic: " .. #airbaseCache .. " airdromes available")
+  return airbaseCache
+end
+
+----------------------------------------------------------------------
+-- FLIGHT SPAWN
+----------------------------------------------------------------------
+
+function AIR.count()
+  local n = 0
+  for _ in pairs(AIR._flights) do n = n + 1 end
+  return n
+end
+
+-- type/livery from the CIVIL Airliner template pool (one picked at
+-- random), fallback stock type otherwise
+local function trafficType()
+  local tpls = CIV.Templates.byPrefix(C.templates.airliner)
+  if #tpls > 0 then
+    local tpl = tpls[math.random(#tpls)]
+    local unit = tpl.data.units and tpl.data.units[1]
+    if unit and unit.type then return unit.type, unit.livery_id end
+  end
+  return C.fallbackTypes.airliner, nil
+end
+
+local function interceptorAirborne()
+  local found = false
+  CIV.forEachPlayer(function(u, info)
+    if not found and info.category == Unit.Category.AIRPLANE and u:inAir() then
+      found = true
+    end
+  end)
+  return found
+end
+
+function AIR.spawn()
+  if not AT.enabled then return nil end
+  if AIR.count() >= AT.maxActive then return nil end
+  local list = airports()
+  if #list < 2 then return nil end
+
+  local from, to
+  for _ = 1, 15 do
+    from = list[math.random(#list)]
+    local cand = list[math.random(#list)]
+    if cand.name ~= from.name
+       and CIV.dist2D(from.point, cand.point) >= AT.minLegKm * 1000 then
+      to = cand
+      break
+    end
+  end
+  if not to then return nil end
+
+  -- sometimes the flight strays through a restricted zone; armed only if
+  -- a player airplane is airborne to answer it (no interceptors, no task)
+  local viaZone = nil
+  if RS.enabled and math.random(100) <= RS.violationChance then
+    local zones = CIV.Zones.byPrefix(C.zones.restricted)
+    if #zones > 0 and (not RS.requirePlayers or interceptorAirborne()) then
+      viaZone = zones[math.random(#zones)]
+    end
+  end
+
+  AIR._fid = AIR._fid + 1
+  local alt = CIV.randBetween(AT.altitude)
+  local speed = CIV.randBetween(AT.speed)
+  local typeName, livery = trafficType()
+  local gname = CIV.uniqueName("CIVIL_TRAFFIC")
+  local brg = CIV.bearingDeg(from.point,
+    viaZone and { x = viaZone.center.x, z = viaZone.center.z } or to.point)
+  local sp = CIV.offsetPoint(from.point, brg, 5000)
+  local spAlt = CIV.groundY(sp) + math.max(600, alt * 0.4)
+
+  local points = {
+    { x = sp.x, y = sp.z, alt = spAlt, alt_type = "BARO",
+      type = "Turning Point", action = "Turning Point", speed = speed },
+  }
+  if viaZone then
+    points[#points + 1] = { x = viaZone.center.x, y = viaZone.center.z,
+      alt = alt, alt_type = "BARO", type = "Turning Point",
+      action = "Turning Point", speed = speed }
+  end
+  points[#points + 1] = { x = to.point.x, y = to.point.z, alt = alt,
+    alt_type = "BARO", type = "Land", action = "Landing", speed = speed,
+    airdromeId = to.id }
+
+  local ok = pcall(coalition.addGroup, C.countryId, Group.Category.AIRPLANE, {
+    visible = false, lateActivation = false, task = "Nothing",
+    name = gname, groupId = CIV.newGroupId(), communication = false,
+    units = { {
+      type = typeName, name = gname .. "_1", unitId = CIV.newUnitId(),
+      x = sp.x, y = sp.z, alt = spAlt, alt_type = "BARO", speed = speed,
+      heading = math.rad(brg), skill = "Excellent", livery_id = livery,
+      payload = { pylons = {}, fuel = 3000, flare = 0, chaff = 0, gun = 0 },
+    } },
+    route = { points = points },
+  })
+  if not ok then
+    CIV.log("Air traffic: spawn failed for type " .. tostring(typeName))
+    return nil
+  end
+
+  local flight = {
+    id = AIR._fid, gname = gname, from = from, to = to,
+    viaZone = viaZone, violationActive = false, resolved = false,
+    interceptTime = {}, spawnedAt = timer.getTime(),
+  }
+  AIR._flights[flight.id] = flight
+  CIV.log("Air traffic: flight #" .. flight.id .. " " .. from.name ..
+    " -> " .. to.name .. (viaZone and " (VIOLATOR)" or ""))
+  return flight
+end
+
+local function flightUnit(flight)
+  local g = Group.getByName(flight.gname)
+  local u = g and g:getUnit(1)
+  if u and u:isExist() then return u end
+  return nil
+end
+
+local function removeFlight(flight, despawnAfter)
+  AIR._flights[flight.id] = nil
+  CIV.unmark(flight.zoneMarkId)
+  local gname = flight.gname
+  CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 1)
+end
+
+-- resume the flight plan to the destination (after intercept or divert)
+local function resumeToDestination(flight, fromP, speed)
+  local g = Group.getByName(flight.gname)
+  if not g then return end
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = fromP.x, y = fromP.z, alt = fromP.y, alt_type = "BARO",
+        type = "Turning Point", action = "Turning Point", speed = speed },
+      { x = flight.to.point.x, y = flight.to.point.z, alt = fromP.y,
+        alt_type = "BARO", type = "Land", action = "Landing", speed = speed,
+        airdromeId = flight.to.id },
+    } } } })
+  end)
+end
+
+-- violators loiter: keep steering them back onto the zone center until
+-- the violation is resolved (intercept or self-divert)
+local function loiterInZone(flight, fromP, speed)
+  local g = Group.getByName(flight.gname)
+  if not g then return end
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = fromP.x, y = fromP.z, alt = fromP.y, alt_type = "BARO",
+        type = "Turning Point", action = "Turning Point", speed = speed },
+      { x = flight.viaZone.center.x, y = flight.viaZone.center.z,
+        alt = fromP.y, alt_type = "BARO", type = "Turning Point",
+        action = "Turning Point", speed = speed },
+    } } } })
+  end)
+end
+
+----------------------------------------------------------------------
+-- TRAFFIC + VIOLATION LOOP
+----------------------------------------------------------------------
+
+local nextAirSpawn = timer.getTime() + CIV.randBetween(AT.spawnEvery)
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, flight in pairs(AIR._flights) do
+    local u = flightUnit(flight)
+    if not u then
+      removeFlight(flight, 1)
+    elseif now - flight.spawnedAt > AT.maxLifetime then
+      removeFlight(flight, 1)      -- hard cleanup for stragglers
+    else
+      local p = u:getPoint()
+
+      -- arrival: landed near the destination -> cleared after shutdown
+      if not u:inAir() and CIV.speed(u:getVelocity()) < 2
+         and CIV.dist2D(p, flight.to.point) < 8000 then
+        removeFlight(flight, 120)
+
+      -- violation lifecycle
+      elseif flight.viaZone and not flight.resolved then
+        if not flight.violationActive then
+          if CIV.Zones.contains(flight.viaZone, p) then
+            flight.violationActive = true
+            flight.violatedAt = now
+            flight.nextLoiterKick = 0
+            flight.zoneMarkId = CIV.drawEventZone(flight.viaZone,
+              "RESTRICTED - unauthorized traffic", "restricted")
+            CIV.msgAll("AIRSPACE ALERT: unidentified civil traffic entered " ..
+              "the restricted area " .. flight.viaZone.name ..
+              " and is loitering.\nMilitary flights: intercept and identify " ..
+              "(fly within " .. RS.intercept.radius .. " m of it for " ..
+              RS.intercept.seconds .. " seconds).", 25)
+          end
+        else
+          -- keep the violator loitering inside the zone
+          if now >= (flight.nextLoiterKick or 0) then
+            flight.nextLoiterKick = now + 60
+            loiterInZone(flight, p, CIV.randBetween(AT.speed) * 0.8)
+          end
+          -- intercept check
+          local caught = nil
+          CIV.forEachPlayer(function(a, info)
+            if caught or info.category ~= Unit.Category.AIRPLANE then return end
+            if not a:inAir() then return end
+            if CIV.dist2D(a:getPoint(), p) <= RS.intercept.radius then
+              flight.interceptTime[info.unitName] =
+                (flight.interceptTime[info.unitName] or 0) + 10
+              if flight.interceptTime[info.unitName] >= RS.intercept.seconds then
+                caught = info
+              end
+            end
+          end)
+          if caught then
+            flight.resolved = true
+            CIV.unmark(flight.zoneMarkId)
+            flight.zoneMarkId = nil
+            CIV.Score.award(caught.playerName, "intercept", 0.9, 0.5, 1,
+              "restricted-area intercept")
+            CIV.msgAll("INTERCEPT: " .. caught.playerName ..
+              " identified the violator and is escorting it out of " ..
+              flight.viaZone.name .. ". Traffic resuming its flight plan.", 15)
+            resumeToDestination(flight, p, CIV.randBetween(AT.speed))
+          elseif now - flight.violatedAt > RS.divertAfter then
+            flight.resolved = true
+            CIV.unmark(flight.zoneMarkId)
+            flight.zoneMarkId = nil
+            CIV.msgAll("AIRSPACE ALERT: ATC diverted the unauthorized " ..
+              "traffic out of " .. flight.viaZone.name ..
+              " (no interceptor on it). Alert over.", 15)
+            resumeToDestination(flight, p, CIV.randBetween(AT.speed))
+          end
+        end
+      end
+    end
+  end
+  if AT.enabled and now >= nextAirSpawn then
+    AIR.spawn()
+    nextAirSpawn = now + CIV.randBetween(AT.spawnEvery)
+  end
+  return t + 10
+end, nil, 30)
+
+CIV.EventStarters.traffic = { label = "Civil traffic flight",
+  fn = function() return AIR.spawn() end }
+
+CIV.log("CivilAirTraffic loaded")
+
+-- ====================================================================
+-- >>> Scripts/47_CivilSeaOps.lua
+-- ====================================================================
+----------------------------------------------------------------------
+-- DCS Civil Mission Template - Sea operations
+-- File: 47_CivilSeaOps.lua  (requires 01_CivilCore.lua; load after the
+-- other intervention files, before 50_CivilCommand.lua)
+--
+--   SEA TRAFFIC: merchant ships spawn at a random point inside a
+--   "CIVIL Sea Spawn" zone (staggered: two ships on the same spot
+--   explode), sail a route over the "CIVIL Sea Lane" waypoint pool
+--   (local random walk, same pattern as the police chase) and end in a
+--   "CIVIL Sea Despawn" zone, where they are cleared. Purely scenic on
+--   its own, and the target pool for the coast guard tasks.
+--
+--   COAST GUARD: helicopter inspection task. Fly alongside the reported
+--   merchant (low, slow, close) to check the manifest. A clean manifest
+--   pays a partial score; SUSPICIOUS cargo escalates: the ship runs for
+--   it, the helicopter keeps track of it until the patrol boat arrives
+--   and boards. Full score to the inspecting pilot on the boarding.
+----------------------------------------------------------------------
+
+assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
+
+local C = CIV.Config
+local ST = C.seaOps.traffic
+local CG = C.seaOps.coastGuard
+
+----------------------------------------------------------------------
+-- SEA TRAFFIC
+----------------------------------------------------------------------
+
+CIV.SeaTraffic = { _ships = {}, _sid = 0 }
+local SEA = CIV.SeaTraffic
+
+local function zonesReady()
+  return #CIV.Zones.byPrefix(C.zones.seaSpawn) > 0
+     and #CIV.Zones.byPrefix(C.zones.seaDespawn) > 0
+end
+
+function SEA.count()
+  local n = 0
+  for _ in pairs(SEA._ships) do n = n + 1 end
+  return n
+end
+
+local function shipUnit(ship)
+  local g = Group.getByName(ship.gname)
+  local u = g and g:getUnit(1)
+  if u and u:isExist() then return u end
+  return nil
+end
+
+-- random point inside a zone, kept clear of the other active ships
+local function randomPointIn(area, minGap)
+  for _ = 1, 12 do
+    local ang = math.random() * 2 * math.pi
+    local r = math.sqrt(math.random()) * math.max(200, (area.radius or 400) * 0.8)
+    local p = { x = area.center.x + math.cos(ang) * r,
+                z = area.center.z + math.sin(ang) * r }
+    local clear = true
+    for _, ship in pairs(SEA._ships) do
+      local u = shipUnit(ship)
+      if u and CIV.dist2D(u:getPoint(), p) < minGap then clear = false break end
+    end
+    if clear then return p end
+  end
+  return nil
+end
+
+-- Route: from the lane point nearest the spawn, walk laneHops nearby lane
+-- points (local random walk over the CIVIL Sea Lane pool), then head for
+-- the despawn zone nearest the last hop. No lanes defined = straight to
+-- the despawn zone.
+local function buildRoute(fromP)
+  local hops = {}
+  local lanes = CIV.Pool.load(C.zones.seaLane)
+  if #lanes > 0 then
+    local current, bestDist = nil, 1e12
+    for _, pt in ipairs(lanes) do
+      local d = CIV.dist2D(pt.point, fromP)
+      if d < bestDist then current, bestDist = pt, d end
+    end
+    local lastName = nil
+    while current and #hops < ST.laneHops do
+      hops[#hops + 1] = current
+      local nearby = CIV.Pool.near(C.zones.seaLane, current.point,
+        ST.neighborRadius, lastName)
+      lastName = current.name
+      current = #nearby > 0 and nearby[math.random(#nearby)] or nil
+    end
+  end
+  local lastP = #hops > 0 and hops[#hops].point or fromP
+  local dz = CIV.Zones.nearest(C.zones.seaDespawn, lastP)
+  return hops, dz
+end
+
+-- (re)assign the sailing route from an arbitrary start point
+local function routeShip(ship, fromP, speed)
+  local g = Group.getByName(ship.gname)
+  if not g then return end
+  local points = { { x = fromP.x, y = fromP.z, type = "Turning Point", speed = speed } }
+  for _, hop in ipairs(ship.remainingHops or ship.hops) do
+    points[#points + 1] = { x = hop.point.x, y = hop.point.z,
+                            type = "Turning Point", speed = speed }
+  end
+  points[#points + 1] = { x = ship.endP.x, y = ship.endP.z,
+                          type = "Turning Point", speed = speed }
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = points } } })
+  end)
+end
+
+function SEA.spawn()
+  if not ST.enabled or not zonesReady() then return nil end
+  if SEA.count() >= ST.maxActive then return nil end
+  local areas = CIV.Zones.byPrefix(C.zones.seaSpawn)
+  local area = areas[math.random(#areas)]
+  local p = randomPointIn(area, ST.minSpawnGap)
+  if not p then return nil end
+  local hops, dzArea = buildRoute(p)
+  if not dzArea then return nil end
+
+  SEA._sid = SEA._sid + 1
+  local gname = CIV.spawnBoat({ x = p.x, y = 0, z = p.z }, "CIVIL_MERCHANT",
+    C.templates.merchant, C.fallbackTypes.merchant)
+  local ship = {
+    id = SEA._sid, gname = gname, hops = hops,
+    endP = { x = dzArea.center.x, z = dzArea.center.z },
+    speed = ST.speed, spawnedAt = timer.getTime(), inspection = nil,
+  }
+  SEA._ships[ship.id] = ship
+  CIV.schedule(function() routeShip(ship, p, ship.speed) end, nil, 2)
+  CIV.log("Sea traffic: merchant #" .. ship.id .. " sailing out of " .. area.name)
+  return ship
+end
+
+local function removeShip(ship, despawnAfter)
+  SEA._ships[ship.id] = nil
+  local gname = ship.gname
+  CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 1)
+end
+
+-- traffic loop: arrivals, hard cleanup, spawn cadence
+local nextSeaSpawn = timer.getTime() + CIV.randBetween(ST.spawnEvery)
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, ship in pairs(SEA._ships) do
+    local u = shipUnit(ship)
+    if not u then
+      SEA._ships[ship.id] = nil
+    elseif CIV.dist2D(u:getPoint(), ship.endP) <= ST.arriveRadius
+        or now - ship.spawnedAt > ST.maxLifetime then
+      if ship.inspection and CIV.CoastGuard then
+        CIV.CoastGuard.shipGone(ship.inspection)
+      end
+      removeShip(ship, 5)
+    end
+  end
+  if ST.enabled and now >= nextSeaSpawn then
+    SEA.spawn()
+    nextSeaSpawn = now + CIV.randBetween(ST.spawnEvery)
+  end
+  return t + 20
+end, nil, 20)
+
+----------------------------------------------------------------------
+-- COAST GUARD
+----------------------------------------------------------------------
+
+CIV.CoastGuard = { _tasks = {}, _tid = 0 }
+local CGD = CIV.CoastGuard
+
+-- opts (command center): { point = vec3 (targets the merchant nearest the
+--                          marker), severity = 1..10 }
+function CGD.start(opts)
+  if not CG.enabled then return nil end
+  local candidates = {}
+  for _, ship in pairs(SEA._ships) do
+    if not ship.inspection then
+      local u = shipUnit(ship)
+      if u then candidates[#candidates + 1] = { ship = ship, unit = u } end
+    end
+  end
+  if #candidates == 0 then return nil end
+
+  local pick
+  if opts and opts.point then
+    local bestDist = 1e12
+    for _, cand in ipairs(candidates) do
+      local d = CIV.dist2D(cand.unit:getPoint(), opts.point)
+      if d < bestDist then pick, bestDist = cand, d end
+    end
+  else
+    pick = candidates[math.random(#candidates)]
+  end
+
+  CGD._tid = CGD._tid + 1
+  local task = {
+    id = CGD._tid, ship = pick.ship, state = "inspect",
+    severity = (opts and opts.severity)
+      and math.max(1, math.min(10, opts.severity))
+      or CIV.rollSeverity(CG.severity),
+    inspectTime = {},        -- unitName -> seconds alongside
+    startedAt = timer.getTime(),
+  }
+  pick.ship.inspection = task.id
+  CGD._tasks[task.id] = task
+  local p = pick.unit:getPoint()
+  CIV.msgAll("COAST GUARD (severity " .. task.severity .. "/10): inspect " ..
+    "the merchant vessel M/V " .. (100 + task.id) ..
+    ", last reported at:\n" .. CIV.coordText(p) ..
+    "\nFly alongside LOW and SLOW (within " .. CG.inspect.radius ..
+    " m, below " .. CG.inspect.maxRelAlt .. " m over the deck) for " ..
+    CG.inspect.seconds .. " seconds to check the manifest.", 25)
+  CIV.log("Coast guard task #" .. task.id .. " on merchant #" .. pick.ship.id)
+  return task
+end
+
+local function closeTask(task)
+  if task.ship then task.ship.inspection = nil end
+  if task.boatGname then
+    local gname = task.boatGname
+    CIV.schedule(function() CIV.despawnGroup(gname) end, nil, 120)
+  end
+  CGD._tasks[task.id] = nil
+end
+
+-- command center: close a task without any outcome
+function CGD.cancel(task)
+  if not CGD._tasks[task.id] then return false end
+  closeTask(task)
+  return true
+end
+
+-- the merchant under inspection vanished (arrived or was cleaned up)
+function CGD.shipGone(taskId)
+  local task = CGD._tasks[taskId]
+  if not task then return end
+  CIV.msgAll("COAST GUARD: the merchant left the patrol sector. Task over.", 12)
+  closeTask(task)
+end
+
+-- patrol boat dispatch: launched from the nearest CIVIL Vessel Spawn
+-- harbor, re-tasked toward the (moving) suspect every pursuit tick
+local function dispatchPatrolBoat(task, targetP)
+  local best, bestDist = nil, 1e12
+  for _, pt in ipairs(CIV.Pool.load(C.zones.vesselSpawn)) do
+    local d = CIV.dist2D(pt.point, targetP)
+    if d < bestDist then best, bestDist = pt, d end
+  end
+  if not best then return end
+  task.boatGname = CIV.spawnBoat(best.point, "CIVIL_PATROL",
+    C.templates.vessel, C.fallbackTypes.rescueBoat)
+  CIV.msgAll("COAST GUARD: patrol boat launched from " .. best.name ..
+    ", keep track of the suspect until it arrives.", 12)
+end
+
+local function steerBoat(task, targetP)
+  if not task.boatGname then return end
+  local g = Group.getByName(task.boatGname)
+  if not g then return end
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = targetP.x, y = targetP.z, type = "Turning Point",
+        speed = C.rescue.vessels.speed },
+    } } } })
+  end)
+end
+
+-- suspect ships stop following the lanes and run straight for the exit
+local function shipFlees(task, fromP)
+  task.ship.remainingHops = {}
+  task.ship.speed = CG.fleeSpeed
+  routeShip(task.ship, { x = fromP.x, z = fromP.z }, CG.fleeSpeed)
+end
+
+-- inspection / pursuit loop (2 s tick)
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, task in pairs(CGD._tasks) do
+    local u = shipUnit(task.ship)
+    if not u then
+      CGD.shipGone(task.id)
+    else
+      local sp = u:getPoint()
+      if task.state == "inspect" then
+        CIV.forEachPlayerHelo(function(h, info)
+          if task.state ~= "inspect" then return end
+          local hp = h:getPoint()
+          local relAlt = hp.y - sp.y
+          local relOk = relAlt >= 0 and relAlt <= CG.inspect.maxRelAlt
+          local hv, sv = h:getVelocity(), u:getVelocity()
+          local relSpeed = CIV.speed({ x = hv.x - sv.x, y = hv.y - sv.y,
+                                       z = hv.z - sv.z })
+          if CIV.dist2D(hp, sp) <= CG.inspect.radius and relOk
+             and relSpeed <= CG.inspect.maxRelSpeed then
+            task.inspectTime[info.unitName] =
+              (task.inspectTime[info.unitName] or 0) + 2
+            if task.inspectTime[info.unitName] >= CG.inspect.seconds then
+              task.inspector = info.playerName
+              if math.random(100) <= CG.suspectChance then
+                task.state = "pursuit"
+                task.lastContact = now
+                CIV.msgAll("COAST GUARD: " .. info.playerName ..
+                  " reports SUSPICIOUS CARGO on deck. The vessel is " ..
+                  "running: keep track of it (within " ..
+                  math.floor(CG.track.radius / 1000) ..
+                  " km) until the patrol boat boards it.", 20)
+                shipFlees(task, sp)
+                dispatchPatrolBoat(task, sp)
+              else
+                CIV.msgAll("COAST GUARD: manifest of the inspected vessel " ..
+                  "is CLEAN. Good check, " .. info.playerName .. ".", 15)
+                CIV.Score.award(info.playerName, "coastGuard", 0.6, 0.5,
+                  CIV.severityMult(task.severity), "vessel inspection (clean)")
+                closeTask(task)
+              end
+            end
+          end
+        end)
+      elseif task.state == "pursuit" then
+        -- helicopter must keep contact
+        local contact = false
+        CIV.forEachPlayerHelo(function(h)
+          if not contact
+             and CIV.dist2D(h:getPoint(), sp) <= CG.track.radius then
+            contact = true
+          end
+        end)
+        if contact then task.lastContact = now end
+        if now - task.lastContact > CG.track.graceSeconds then
+          CIV.msgAll("COAST GUARD: contact lost too long, the suspect " ..
+            "slipped away. Task failed.", 15)
+          closeTask(task)
+        else
+          -- steer the patrol boat onto the moving target
+          task.nextSteer = task.nextSteer or 0
+          if now >= task.nextSteer then
+            task.nextSteer = now + 30
+            steerBoat(task, sp)
+          end
+          -- boarding check
+          if task.boatGname then
+            local bg = Group.getByName(task.boatGname)
+            local bu = bg and bg:getUnit(1)
+            if bu and bu:isExist()
+               and CIV.dist2D(bu:getPoint(), sp) <= CG.boatHold.radius then
+              task.boardTime = (task.boardTime or 0) + 2
+              if task.boardTime >= CG.boatHold.seconds then
+                CIV.msgAll("COAST GUARD: suspect vessel BOARDED. Cargo " ..
+                  "seized. Textbook work by " ..
+                  (task.inspector or "the patrol") .. ".", 20)
+                if task.inspector then
+                  CIV.Score.award(task.inspector, "coastGuard", 1.0, 0.5,
+                    CIV.severityMult(task.severity),
+                    "vessel inspection (suspect boarded)")
+                end
+                -- the merchant heaves to under escort, then clears out
+                pcall(function()
+                  local g = Group.getByName(task.ship.gname)
+                  if g then g:getController():setTask({ id = "Hold", params = {} }) end
+                end)
+                local ship = task.ship
+                CIV.schedule(function() removeShip(ship, 1) end, nil, 300)
+                closeTask(task)
+              end
+            else
+              task.boardTime = nil
+            end
+          end
+        end
+      end
+    end
+  end
+  return t + 2
+end, nil, 25)
+
+CIV.EventStarters.inspection = { label = "Coast guard inspection",
+  fn = function() return CGD.start() end }
+CIV.EventStarters.merchant = { label = "Merchant ship (sea traffic)",
+  fn = function() return SEA.spawn() end }
+
+CIV.Menu_register(function(gid)
+  local sub = missionCommands.addSubMenuForGroup(gid, "Coast guard", CIV.rootMenu[gid])
+  missionCommands.addCommandForGroup(gid, "Active sea tasks", sub, function()
+    local n, txt = 0, "Active sea tasks:\n"
+    for _, task in pairs(CGD._tasks) do
+      n = n + 1
+      local u = shipUnit(task.ship)
+      txt = txt .. string.format("- Inspection M/V %d (severity %d/10, %s)%s\n",
+        100 + task.id, task.severity, task.state,
+        u and ("  " .. CIV.llString(u:getPoint())) or "")
+    end
+    txt = txt .. string.format("Merchant traffic: %d ship(s) at sea.", SEA.count())
+    CIV.msgGroupId(gid, n > 0 and txt
+      or ("No inspection tasks. Merchant traffic: " .. SEA.count() .. " ship(s) at sea."), 20)
+  end)
+end)
+
+CIV.log("CivilSeaOps loaded")
 
 -- ====================================================================
 -- >>> Scripts/50_CivilCommand.lua
@@ -4950,6 +5895,10 @@ CIV.log("CivilAviation loaded")
 --   civil recon [sev]         corridor anomaly at the marker
 --   civil vip [sev]           VIP shuttle from the pad nearest the marker
 --   civil transfer [sev]      medical transfer from the pad nearest the marker
+--   civil inspect [sev]       coast guard inspection on the merchant
+--                             nearest the marker
+--   civil ship                spawn a merchant on the sea lanes
+--   civil flight              spawn an ambient civil flight
 --   civil cargo [tier] [pri]  loading point at the marker (tier: light/
 --                             medium/heavy/heavy_lift)
 --   civil spawn <tpl> [n]     clone a late-activated template whose name
@@ -5089,6 +6038,16 @@ local function cancelNearest(point)
         function() CIV.MedTransfer.cancel(job) end)
     end
   end
+  if CIV.CoastGuard then
+    for _, task in pairs(CIV.CoastGuard._tasks) do
+      local g = Group.getByName(task.ship.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        consider(u:getPoint(), "coast guard inspection #" .. task.id,
+          function() CIV.CoastGuard.cancel(task) end)
+      end
+    end
+  end
   if best then
     best.fn()
     say("cancelled: " .. best.label .. ".")
@@ -5153,6 +6112,28 @@ commands.transfer = function(args, point)
   if not CIV.MedTransfer.start({ nearPoint = point,
       severity = toSeverity(args[1]) }) then
     say("transfer command failed (needs at least 2 CIVIL VIP Pad zones).")
+  end
+end
+
+commands.inspect = function(args, point)
+  if not CIV.CoastGuard then moduleMissing("sea ops") return end
+  if not CIV.CoastGuard.start({ point = point,
+      severity = toSeverity(args[1]) }) then
+    say("inspect command failed (no free merchant at sea).")
+  end
+end
+
+commands.ship = function(_, _)
+  if not CIV.SeaTraffic then moduleMissing("sea ops") return end
+  if not CIV.SeaTraffic.spawn() then
+    say("ship command failed (cap reached or missing sea zones).")
+  end
+end
+
+commands.flight = function(_, _)
+  if not CIV.AirTraffic then moduleMissing("air traffic") return end
+  if not CIV.AirTraffic.spawn() then
+    say("flight command failed (cap reached or fewer than 2 airports).")
   end
 end
 
@@ -5242,7 +6223,8 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer|inspect [severity]\n" ..
+    CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..
     CMD.markerPrefix .. " move <group> [speed] [road]\n" ..

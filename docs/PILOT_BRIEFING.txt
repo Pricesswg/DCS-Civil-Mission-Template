@@ -67,6 +67,22 @@ pad; every hard maneuver costs comfort, and comfort is your score. Media:
 hold 1-3 km from an active event, above 100 m, for 5 minutes and your
 footage airs for points.
 
+TASK BOARD. Recon, VIP shuttle and medical transfer arrive as OFFERS on
+the task board, not as orders: check F10 -> Aviation tasks -> Task board
+and accept one when you are ready. Offers show severity and expected
+points; PRIORITY offers pay a bonus. Unclaimed offers expire.
+
+COAST GUARD (helicopters). A merchant vessel needs an inspection: reach
+it and fly alongside, low and slow, to check the deck. Clean manifest,
+partial score. Suspicious cargo and the ship RUNS: keep track of it
+(3 km) until the patrol boat arrives and boards. Full score on the
+boarding, failure if you lose contact too long.
+
+AIRSPACE ALERT (military flights). Civil traffic sometimes strays into a
+restricted area and loiters. Intercept it: fly within 500 m of it for 30
+seconds to identify and escort it out. If nobody answers, ATC diverts it
+after a while and the alert closes with no points.
+
 MEDICAL TRANSFER. Sometimes a delivered patient must continue to a
 regional hospital far away: a transfer job spawns at the pad nearest the
 delivery. Same boarding as the VIP shuttle, but the clock is a criticality

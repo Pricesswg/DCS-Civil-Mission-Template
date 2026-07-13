@@ -22,6 +22,10 @@
 --   civil recon [sev]         corridor anomaly at the marker
 --   civil vip [sev]           VIP shuttle from the pad nearest the marker
 --   civil transfer [sev]      medical transfer from the pad nearest the marker
+--   civil inspect [sev]       coast guard inspection on the merchant
+--                             nearest the marker
+--   civil ship                spawn a merchant on the sea lanes
+--   civil flight              spawn an ambient civil flight
 --   civil cargo [tier] [pri]  loading point at the marker (tier: light/
 --                             medium/heavy/heavy_lift)
 --   civil spawn <tpl> [n]     clone a late-activated template whose name
@@ -161,6 +165,16 @@ local function cancelNearest(point)
         function() CIV.MedTransfer.cancel(job) end)
     end
   end
+  if CIV.CoastGuard then
+    for _, task in pairs(CIV.CoastGuard._tasks) do
+      local g = Group.getByName(task.ship.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        consider(u:getPoint(), "coast guard inspection #" .. task.id,
+          function() CIV.CoastGuard.cancel(task) end)
+      end
+    end
+  end
   if best then
     best.fn()
     say("cancelled: " .. best.label .. ".")
@@ -225,6 +239,28 @@ commands.transfer = function(args, point)
   if not CIV.MedTransfer.start({ nearPoint = point,
       severity = toSeverity(args[1]) }) then
     say("transfer command failed (needs at least 2 CIVIL VIP Pad zones).")
+  end
+end
+
+commands.inspect = function(args, point)
+  if not CIV.CoastGuard then moduleMissing("sea ops") return end
+  if not CIV.CoastGuard.start({ point = point,
+      severity = toSeverity(args[1]) }) then
+    say("inspect command failed (no free merchant at sea).")
+  end
+end
+
+commands.ship = function(_, _)
+  if not CIV.SeaTraffic then moduleMissing("sea ops") return end
+  if not CIV.SeaTraffic.spawn() then
+    say("ship command failed (cap reached or missing sea zones).")
+  end
+end
+
+commands.flight = function(_, _)
+  if not CIV.AirTraffic then moduleMissing("air traffic") return end
+  if not CIV.AirTraffic.spawn() then
+    say("flight command failed (cap reached or fewer than 2 airports).")
   end
 end
 
@@ -314,7 +350,8 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer|inspect [severity]\n" ..
+    CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..
     CMD.markerPrefix .. " move <group> [speed] [road]\n" ..

@@ -62,6 +62,7 @@ function RC.start(opts)
     or CIV.rollSeverity(CR.severity)
   local anomaly = {
     id = RC._aid, pt = pt, point = pt.point, severity = sev,
+    scoreBonus = (opts and opts.scoreBonus) or 1,   -- task-board priority bonus
     expiresAt = timer.getTime() + CR.ttl,
     startedAt = timer.getTime(),
     hinted = {},
@@ -115,7 +116,8 @@ local function reportAnomaly(uname)
         local timeFactor = math.max(0,
           1 - (timer.getTime() - anomaly.startedAt) / CR.ttl)
         CIV.Score.award(info.playerName, "recon", 0.8, timeFactor,
-          CIV.severityMult(anomaly.severity), "anomaly reported")
+          CIV.severityMult(anomaly.severity) * (anomaly.scoreBonus or 1),
+          "anomaly reported")
       end
       CIV.msgAll("RECON: anomaly at " .. anomaly.pt.name ..
         " identified and reported. Maintenance is on the way.", 15)
@@ -195,6 +197,7 @@ function VP.start(opts)
     severity = (opts and opts.severity)
       and math.max(1, math.min(10, opts.severity))
       or CIV.rollSeverity(CV.severity),
+    scoreBonus = (opts and opts.scoreBonus) or 1,   -- task-board priority bonus
     expiresAt = timer.getTime() + CV.pickupTtl,
     state = "waiting", unitName = nil,
     penalty = 0, lastVel = nil, lastComplaint = 0,
@@ -292,7 +295,7 @@ CIV.schedule(function(_, t)
             local quality = math.max(0, 1 - job.penalty)
             if info then
               CIV.Score.award(info.playerName, "vip", quality, 0.5,
-                CIV.severityMult(job.severity),
+                CIV.severityMult(job.severity) * (job.scoreBonus or 1),
                 string.format("VIP shuttle (comfort %d%%)", math.floor(quality * 100)))
             end
             CIV.msgAll("VIP SHUTTLE: passenger delivered to " .. job.to.name ..
@@ -356,6 +359,7 @@ function MT.start(opts)
     or CIV.rollSeverity({ min = CT.minSeverity, max = 10 })
   local job = {
     id = MT._tid, from = from, to = dest, severity = sev,
+    scoreBonus = opts.scoreBonus or 1,   -- task-board priority bonus
     deadline = timer.getTime()
       + CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
     deadlineTotal = CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
@@ -465,7 +469,7 @@ CIV.schedule(function(_, t)
             local timeFactor = math.max(0, (job.deadline - now) / job.deadlineTotal)
             if info then
               CIV.Score.award(info.playerName, "medTransfer", quality, timeFactor,
-                CIV.severityMult(job.severity),
+                CIV.severityMult(job.severity) * (job.scoreBonus or 1),
                 string.format("medical transfer (comfort %d%%)",
                   math.floor(quality * 100)))
             end
@@ -641,6 +645,124 @@ if CM.enabled then
 end
 
 ----------------------------------------------------------------------
+-- TASK BOARD (pilot-called aviation tasks)
+-- Recon, VIP and medical transfer are not pushed on the pilots anymore:
+-- the director POSTS OFFERS and whoever is ready accepts one via F10
+-- (maybe you are refueling, or mid-task: nothing gets assigned to you).
+-- Offers pre-roll severity so the board shows the expected points, and
+-- PRIORITY offers carry a score bonus. GM marker commands bypass the
+-- board on purpose: the commander wants the event NOW. The MedEvac chain
+-- also stays direct: that patient already exists and his clock is
+-- ticking.
+----------------------------------------------------------------------
+
+CIV.TaskBoard = { _offers = {}, _oid = 0 }
+local TB = CIV.TaskBoard
+local CB = C.taskBoard
+
+local offerKinds = {
+  recon    = { label = "Recon anomaly", scoreKey = "recon",
+               start = function(o) return RC.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+  vip      = { label = "VIP shuttle", scoreKey = "vip",
+               start = function(o) return VP.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+  transfer = { label = "Medical transfer", scoreKey = "medTransfer",
+               start = function(o) return MT.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+}
+
+local function offerCount()
+  local n = 0
+  for _ in pairs(TB._offers) do n = n + 1 end
+  return n
+end
+
+function TB.post(kind)
+  local k = offerKinds[kind]
+  if not k then return nil end
+  if not CB.enabled then
+    -- board disabled in config: fall back to the old push behavior
+    return k.start({ severity = nil, bonus = 1 })
+  end
+  if offerCount() >= CB.maxOffers then return nil end
+  TB._oid = TB._oid + 1
+  local offer = {
+    id = TB._oid, kind = kind, label = k.label,
+    severity = kind == "transfer"
+      and CIV.rollSeverity({ min = C.medTransfer.minSeverity, max = 10 })
+      or CIV.rollSeverity(),
+    priority = math.random(100) <= CB.priorityChance,
+    expiresAt = timer.getTime() + CB.offerTtl,
+  }
+  offer.bonus = offer.priority and CB.priorityBonus or 1
+  offer.points = CIV.Score.compute(k.scoreKey, 0.8, 0.5,
+    CIV.severityMult(offer.severity) * offer.bonus)
+  TB._offers[offer.id] = offer
+  CIV.msgAll("TASK BOARD: new " .. (offer.priority and "PRIORITY " or "") ..
+    "offer: " .. offer.label .. ", severity " .. offer.severity ..
+    "/10, about " .. offer.points .. " pts" ..
+    (offer.priority and (" (includes the +" ..
+      math.floor((CB.priorityBonus - 1) * 100) .. "% priority bonus)") or "") ..
+    ".\nAccept it via F10 -> Aviation tasks -> Task board.", 15)
+  return offer
+end
+
+local function sortedOffers()
+  local list = {}
+  for _, o in pairs(TB._offers) do list[#list + 1] = o end
+  table.sort(list, function(a, b) return a.id < b.id end)
+  return list
+end
+
+local function listOffers(gid)
+  local list = sortedOffers()
+  if #list == 0 then
+    CIV.msgGroupId(gid, "The task board is empty.", 10)
+    return
+  end
+  local txt = "TASK BOARD (accept by slot number):\n"
+  for i, o in ipairs(list) do
+    txt = txt .. string.format("%d. %s%s  severity %d/10  ~%d pts  %d min left\n",
+      i, o.priority and "[PRIORITY] " or "", o.label, o.severity, o.points,
+      math.max(0, math.floor((o.expiresAt - timer.getTime()) / 60)))
+  end
+  CIV.msgGroupId(gid, txt, 25)
+end
+
+function TB.accept(slot, uname)
+  local u = Unit.getByName(uname)
+  local offer = sortedOffers()[slot]
+  if not offer then
+    if u then CIV.msgUnit(u, "No offer in slot " .. slot ..
+      ": check the board first.", 8) end
+    return
+  end
+  TB._offers[offer.id] = nil
+  local started = offerKinds[offer.kind].start(offer)
+  local info = CIV.players[uname]
+  if started then
+    CIV.msgAll("TASK BOARD: '" .. offer.label .. "' accepted" ..
+      (info and (" by " .. info.playerName) or "") .. ". Task is live.", 10)
+  elseif u then
+    CIV.msgUnit(u, "The offer could not start (missing zones or cap " ..
+      "reached). It has been taken off the board.", 10)
+  end
+end
+
+-- offer expiry
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for id, offer in pairs(TB._offers) do
+    if now > offer.expiresAt then
+      TB._offers[id] = nil
+      CIV.log("Task board: offer '" .. offer.label .. "' expired unclaimed")
+    end
+  end
+  return t + 30
+end, nil, 30)
+
+----------------------------------------------------------------------
 -- F10 MENU + EVENT STARTERS
 ----------------------------------------------------------------------
 
@@ -650,6 +772,14 @@ CIV.Menu_register(function(gid, uname)
     sub, reportAnomaly, uname)
   missionCommands.addCommandForGroup(gid, "Skydive: release jumpers (over a drop zone)",
     sub, SK.release, uname)
+  if CB.enabled then
+    local board = missionCommands.addSubMenuForGroup(gid, "Task board", sub)
+    missionCommands.addCommandForGroup(gid, "List offers", board, listOffers, gid)
+    for slot = 1, math.min(CB.maxOffers, 6) do
+      missionCommands.addCommandForGroup(gid, "Accept offer " .. slot, board,
+        function() TB.accept(slot, uname) end)
+    end
+  end
   missionCommands.addCommandForGroup(gid, "Active aviation tasks", sub, function()
     local n, txt = 0, "Active aviation tasks:\n"
     for _, a in pairs(RC._anomalies) do
@@ -673,8 +803,13 @@ CIV.Menu_register(function(gid, uname)
   end)
 end)
 
-CIV.EventStarters.recon = { label = "Recon anomaly", fn = function() return RC.start() end }
-CIV.EventStarters.vip = { label = "VIP shuttle", fn = function() return VP.start() end }
-CIV.EventStarters.transfer = { label = "Medical transfer", fn = function() return MT.start() end }
+-- the director and the admin menu post OFFERS on the board (pilot-called
+-- tasks); with taskBoard.enabled = false TB.post falls back to direct starts
+CIV.EventStarters.recon = { label = "Recon anomaly (board offer)",
+  fn = function() return TB.post("recon") end }
+CIV.EventStarters.vip = { label = "VIP shuttle (board offer)",
+  fn = function() return TB.post("vip") end }
+CIV.EventStarters.transfer = { label = "Medical transfer (board offer)",
+  fn = function() return TB.post("transfer") end }
 
 CIV.log("CivilAviation loaded")

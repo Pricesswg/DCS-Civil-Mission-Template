@@ -36,7 +36,9 @@ Scripts/10_CivilFirefighting.lua
 Scripts/20_CivilRescue.lua      (SAR mountain/sea + MedEvac + CASEVAC)
 Scripts/30_CivilPolice.lua      (chase + SWAT)
 Scripts/40_CivilTransport.lua
-Scripts/45_CivilAviation.lua    (recon, VIP shuttle, media coverage)
+Scripts/45_CivilAviation.lua    (recon, VIP, media, transfer, skydive, board)
+Scripts/46_CivilAirTraffic.lua  (ambient AI flights + restricted areas)
+Scripts/47_CivilSeaOps.lua      (merchant lanes + coast guard)
 Scripts/50_CivilCommand.lua     <- LAST (game-master commands + recap)
 ```
 
@@ -76,6 +78,10 @@ in any destination zone.
 | `CIVIL Recon Point ...` | inspection corridor | 5+ zones along a power line or pipeline; anomalies spawn on them |
 | `CIVIL VIP Pad ...` | passenger shuttle + medical transfer pads | at least 2; put them on airfield aprons and both jobs open up to the fixed-wing. Transfer legs pick a destination at least `medTransfer.minLeg` away (default 15 km), so spread the pads out |
 | `CIVIL Drop Zone ...` | skydive drop zones | optional; an open field per zone. The zone RADIUS is the scoring scale (accuracy = distance from center vs radius), 300-500 m works well |
+| `CIVIL Sea Spawn ...` | merchant route start | on open water (a harbor mouth, over the horizon...); ships appear at a random point inside, kept apart from each other |
+| `CIVIL Sea Lane ...` | merchant waypoints | 2+ zones tracing the shipping lane; ships walk nearby lanes (`seaOps.traffic.neighborRadius`) like the chase walks crossroads |
+| `CIVIL Sea Despawn ...` | merchant route end | on open water; ships are cleared when they arrive |
+| `CIVIL Restricted ...` | military range / no-fly | optional; ambient flights sometimes stray inside and loiter until intercepted (task armed only with a player airplane airborne) |
 | `CIVIL Cargo Destination ...` | cargo delivery | one or more destination zones; deliveries and supply airdrops count in any of them |
 | `CIVIL Medevac Point ...` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point ...` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
@@ -196,6 +202,8 @@ the event runs anyway.
 | `CIVIL Anomaly ...` | recon anomaly visual (ground) | none, logical anomaly |
 | `CIVIL VIP ...` | waiting passenger visual (ground) | none, logical passenger |
 | `CIVIL Skydiver ...` | landed jumpers (ground) | `Soldier M4` |
+| `CIVIL Merchant ...` | sea traffic freighter (ship) | `HandyWind` (TO VALIDATE) |
+| `CIVIL Airliner ...` | ambient flight type/livery (plane) | `Yak-40` |
 
 ## 4b. Ships (regular units placed in the ME, matched by name prefix)
 
