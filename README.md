@@ -282,6 +282,7 @@ fallbacks in `docs/FEASIBILITY.md`.
 * [Civilian Assets by Eightball](https://forum.dcs.world/topic/270558-civilian-objects-and-vehicles/)
 * [Copter Life by Eightball](https://forum.dcs.world/topic/386801-copterlife-mod-pack/)
 * [Fire Department Livery Pack](https://forum.dcs.world/topic/254036-fire-department-livery-pack/#comment-5689752)
+* [Civilian skin pack (DCS User Files)](https://files.digitalcombatsimulator.com/it/files/3313210/)
 * [OV-10A Bronco](https://splitair.gumroad.com/l/fwzxn)
 * [Civil Aircraft Mod](https://cam.em-key.de/)
 
