@@ -51,6 +51,14 @@ two-car convoy. SWAT: board a team at the SWAT base (the callout tells you
 how many operators the job needs), then hold a hover over the objective to
 fast-rope them in.
 
+CONVOY ESCORT. A prisoner transport (police car, school bus, tail car)
+drives from A to B and you shadow it. The route may be watched: fly it
+ahead of the convoy, low, and if you see something odd off the road
+REPORT it via F10 before the convoy gets there. Reported: bonus points
+and the police clears the site. Missed: the convoy drives into the
+ambush, the mission fails and the escort takes a malus. Your coverage
+time is the completion quality, so stay with them.
+
 CARGO. Loads come in fixed mass tiers: check the warning when you arrive,
 some loads need a heavy-lift helicopter. You can re-rig a load to another
 tier via F10, it costs a re-rigging delay. Every load has a delivery

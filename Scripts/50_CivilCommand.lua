@@ -19,6 +19,7 @@
 --   civil casevac [sev]       battlefield casualty at the marker
 --   civil swat [sev]          SWAT objective at the marker
 --   civil chase [sev]         chase from the crossroad nearest the marker
+--   civil convoy [sev]        prisoner convoy run (uses the Convoy Start/End zones)
 --   civil recon [sev]         corridor anomaly at the marker
 --   civil vip [sev]           VIP shuttle from the pad nearest the marker
 --   civil transfer [sev]      medical transfer from the pad nearest the marker
@@ -165,6 +166,16 @@ local function cancelNearest(point)
         function() CIV.MedTransfer.cancel(job) end)
     end
   end
+  if CIV.Convoy then
+    for _, run in pairs(CIV.Convoy._runs) do
+      local g = Group.getByName(run.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        consider(u:getPoint(), "prisoner convoy #" .. run.id,
+          function() CIV.Convoy.cancel(run) end)
+      end
+    end
+  end
   if CIV.CoastGuard then
     for _, task in pairs(CIV.CoastGuard._tasks) do
       local g = Group.getByName(task.ship.gname)
@@ -239,6 +250,14 @@ commands.transfer = function(args, point)
   if not CIV.MedTransfer.start({ nearPoint = point,
       severity = toSeverity(args[1]) }) then
     say("transfer command failed (needs at least 2 CIVIL VIP Pad zones).")
+  end
+end
+
+commands.convoy = function(args, _)
+  if not (CIV.Convoy and CIV.Convoy.start) then moduleMissing("police") return end
+  if not CIV.Convoy.start({ severity = toSeverity(args[1]) }) then
+    say("convoy command failed (needs CIVIL Convoy Start and End zones, " ..
+      "or the cap is reached).")
   end
 end
 
@@ -350,7 +369,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer|inspect [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|inspect [severity]\n" ..
     CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..

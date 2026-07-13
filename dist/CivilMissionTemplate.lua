@@ -83,6 +83,8 @@ CIV.Config = {
     seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
     seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
     restricted        = "CIVIL Restricted",           -- military areas closed to civil traffic (intercept tasks)
+    convoyStart       = "CIVIL Convoy Start",         -- prisoner convoy departure zones
+    convoyEnd         = "CIVIL Convoy End",           -- prisoner convoy destination zones
   },
 
   ------------------------------------------------------------------
@@ -103,6 +105,9 @@ CIV.Config = {
     skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
     merchant = "CIVIL Merchant",   -- ship group: sea traffic freighter
     airliner = "CIVIL Airliner",   -- plane group: ambient air traffic (type/livery source)
+    convoy   = "CIVIL Convoy",     -- vehicle group: police car, school bus, tail car (in that order)
+    ambush   = "CIVIL Ambush",     -- vehicle group: two armed men and a car; build it under a
+                                   -- HOSTILE country if you want the gunmen to actually shoot
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -114,6 +119,8 @@ CIV.Config = {
     skydiver   = "Soldier M4",
     merchant   = "HandyWind",      -- stock bulk freighter, TO VALIDATE type name
     airliner   = "Yak-40",         -- stock small airliner (ambient traffic)
+    convoyCar  = "LandRover_ah",   -- convoy fallback: lead and tail car, TO VALIDATE
+    convoyBus  = "IKARUS Bus",     -- convoy fallback: the school bus, TO VALIDATE
   },
 
   -- Automatic scenery dressing of fixed zones. Everything is OFF by
@@ -172,6 +179,9 @@ CIV.Config = {
       skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
       coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
       intercept   = 14,     -- restricted-area violator identified and escorted out
+      convoy      = 18,     -- prisoner convoy escorted to destination, quality = coverage
+      convoySpot  = 8,      -- ambush reported before the convoy reached it
+      convoyMalus = -10,    -- NEGATIVE: convoy lost to an unreported ambush on your watch
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -496,6 +506,35 @@ CIV.Config = {
     -- radius, below maxAGL) keeps the pursuit on camera: while it holds
     -- contact the helicopter's pressure builds rateBonus times faster, and
     -- the watcher earns an assist when the arrest lands.
+    -- Prisoner convoy escort: a police car, the school bus with the
+    -- detainees and a tail car (build the CIVIL Convoy template in that
+    -- order) drive "On Road" from a CIVIL Convoy Start zone to a CIVIL
+    -- Convoy End zone. The helicopter shadows them. Along the way there is
+    -- a chance an AMBUSH (CIVIL Ambush template) appears ahead of the
+    -- route: spot it and report it via F10 for bonus points, and the
+    -- police clears the site after clearDelay. Miss it and the convoy
+    -- drives into it: mission FAILED, both groups despawn and the
+    -- escorting pilot takes the malus.
+    convoy = {
+      enabled      = true,
+      maxActive    = 1,
+      severity     = { min = 1, max = 10 },
+      speed        = 12,     -- m/s on road (~43 km/h: it is a bus)
+      escortRadius = 2000,   -- m, helicopter within this counts as escorting
+      arriveRadius = 300,    -- m from the destination = delivered
+      ambush = {
+        chance        = 60,   -- % per run (needs a CIVIL Ambush template)
+        delay         = { min = 120, max = 360 },  -- s into the drive before it appears
+        aheadM        = 800,  -- m ahead of the convoy when it appears
+        lateralM      = 50,   -- m off the road
+        hintRadius    = 2500, -- m, aircraft below maxAGL gets the nudge
+        maxAGL        = 600,
+        reportRadius  = 800,  -- m, F10 report valid within this
+        clearDelay    = 60,   -- s after the report before the police clears the site
+        triggerRadius = 250,  -- m, unspotted ambush this close to the convoy = sprung
+      },
+    },
+
     trafficWatch = {
       enabled   = true,
       radius    = 1800,   -- m from the fleeing vehicle: wide enough for a
@@ -534,6 +573,7 @@ CIV.Config = {
       recon       = 20,
       vip         = 20,
       inspection  = 20,
+      convoy      = 15,
       -- fires have their own dedicated scheduler (fire.autoIgnite);
       -- sea/air ambient traffic have their own spawn schedulers too
     },
@@ -1747,7 +1787,7 @@ function CIV.Score.award(playerName, taskType, quality, timeFactor, mult, label)
   CIV.log(string.format("SCORE|%s|%s|%d|q=%.2f|t=%.2f", playerName, taskType,
     points, quality or -1, timeFactor or -1))
   if CIV.Config.score.broadcast then
-    CIV.msgAll(string.format("%s completed: %s  (+%d points, total %d)",
+    CIV.msgAll(string.format("%s completed: %s  (%+d points, total %d)",
       playerName, label or taskType, points, row.points), 12)
   end
   return points
@@ -3982,6 +4022,264 @@ function SW.cancel(scen)
 end
 
 ----------------------------------------------------------------------
+-- PRISONER CONVOY ESCORT
+-- A police car, the school bus with the detainees and a tail car drive
+-- "On Road" from a CIVIL Convoy Start zone to a CIVIL Convoy End zone,
+-- with the helicopter shadowing them. Along the way an AMBUSH (CIVIL
+-- Ambush template: two armed men and a car) may appear ahead of the
+-- route: report it via F10 for bonus points and the police clears the
+-- site; miss it and the convoy drives into it, mission FAILED with a
+-- malus on the escorting pilot. The ambush clone keeps the template's
+-- own country: build it under a hostile country and the gunmen shoot
+-- for real, but the scripted outcome works with any country.
+----------------------------------------------------------------------
+
+CIV.Convoy = { _runs = {}, _cid = 0 }
+local CVY = CIV.Convoy
+local CC = CP.convoy
+
+-- convoy group: template first, else police car + school bus + tail car
+local function spawnConvoyGroup(p)
+  local name = CIV.spawnFromTemplate(C.templates.convoy, p)
+  if name then return name end
+  local gname = CIV.uniqueName("CIVIL_CONVOY")
+  local types = { C.fallbackTypes.convoyCar, C.fallbackTypes.convoyBus,
+                  C.fallbackTypes.convoyCar }
+  local units = {}
+  for i, tp in ipairs(types) do
+    units[i] = { type = tp, name = gname .. "_" .. i, unitId = CIV.newUnitId(),
+      x = p.x - (i - 1) * 15, y = p.z, heading = 0, skill = "Average",
+      playerCanDrive = false }
+  end
+  coalition.addGroup(C.countryId, Group.Category.GROUND, {
+    visible = false, lateActivation = false, task = "Ground Nothing",
+    name = gname, groupId = CIV.newGroupId(), units = units,
+    route = { points = { { x = p.x, y = p.z, type = "Turning Point",
+                           action = "Off Road", speed = 0 } } },
+  })
+  return gname
+end
+
+local function convoyRoute(run, fromP)
+  local g = Group.getByName(run.gname)
+  if not g then return end
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = fromP.x, y = fromP.z, type = "Turning Point",
+        action = run.roadAction, speed = CC.speed },
+      { x = run.endP.x, y = run.endP.z, type = "Turning Point",
+        action = run.roadAction, speed = CC.speed },
+    } } } })
+  end)
+end
+
+-- opts (command center): { severity = 1..10 }
+function CVY.start(opts)
+  if not CC.enabled then return nil end
+  local n = 0
+  for _ in pairs(CVY._runs) do n = n + 1 end
+  if n >= CC.maxActive then return nil end
+  local starts = CIV.Zones.byPrefix(C.zones.convoyStart)
+  local stops = CIV.Zones.byPrefix(C.zones.convoyEnd)
+  if #starts == 0 or #stops == 0 then return nil end
+  local sArea = starts[math.random(#starts)]
+  local eArea = stops[math.random(#stops)]
+  local sp = { x = sArea.center.x,
+               y = land.getHeight({ x = sArea.center.x, y = sArea.center.z }),
+               z = sArea.center.z }
+
+  CVY._cid = CVY._cid + 1
+  local run = {
+    id = CVY._cid, gname = spawnConvoyGroup(sp),
+    endP = { x = eArea.center.x, z = eArea.center.z }, endName = eArea.name,
+    severity = (opts and opts.severity)
+      and math.max(1, math.min(10, opts.severity))
+      or CIV.rollSeverity(CC.severity),
+    roadAction = "On Road",
+    escortTicks = 0, totalTicks = 0, escortName = nil,
+    lastPos = nil, stalledSince = nil, rekicks = 0,
+    -- the ambush needs its template: no CIVIL Ambush group, no threat
+    ambushPlanned = math.random(100) <= CC.ambush.chance
+      and #CIV.Templates.byPrefix(C.templates.ambush) > 0,
+    ambushAt = timer.getTime() + CIV.randBetween(CC.ambush.delay),
+  }
+  local okSize, size0 = pcall(function()
+    return Group.getByName(run.gname):getSize()
+  end)
+  if okSize then run.size0 = size0 end
+  CVY._runs[run.id] = run
+  CIV.schedule(function() convoyRoute(run, sp) end, nil, 2)
+  CIV.msgAll("CONVOY ESCORT (severity " .. run.severity .. "/10): prisoner " ..
+    "transport departing " .. sArea.name .. " for " .. eArea.name ..
+    ".\n" .. CIV.coordText(sp) ..
+    "\nShadow the convoy. Intel says the route may be watched: report " ..
+    "anything suspicious via F10 BEFORE the convoy gets there.", 25)
+  CIV.log("Convoy #" .. run.id .. " severity " .. run.severity ..
+    (run.ambushPlanned and " (ambush planned)" or ""))
+  return run
+end
+
+local function closeRun(run, delay)
+  CVY._runs[run.id] = nil
+  CIV.unmark(run.markId)
+  local cg = run.gname
+  local ag = run.ambush and run.ambush.gname
+  CIV.schedule(function()
+    CIV.despawnGroup(cg)
+    if ag then CIV.despawnGroup(ag) end
+  end, nil, delay or 1)
+end
+
+-- command center: close a run without any outcome
+function CVY.cancel(run)
+  if not CVY._runs[run.id] then return false end
+  closeRun(run, 1)
+  return true
+end
+
+-- F10 report: valid within reportRadius of an unreported ambush
+function CVY.report(uname)
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local p = u:getPoint()
+  for _, run in pairs(CVY._runs) do
+    local amb = run.ambush
+    if amb and not amb.spotted
+       and CIV.dist2D(p, amb.point) <= CC.ambush.reportRadius then
+      amb.spotted = true
+      local info = CIV.players[uname]
+      if info then
+        CIV.Score.award(info.playerName, "convoySpot", 0.9, 0.5,
+          CIV.severityMult(run.severity), "convoy ambush reported")
+      end
+      run.markId = CIV.mark("Reported ambush (police responding)", amb.point)
+      CIV.msgAll("CONVOY ESCORT: armed group reported on the route, " ..
+        "marked on the F10 map. Ground units are moving in to clear the " ..
+        "site before the convoy passes.", 15)
+      local gname = amb.gname
+      CIV.schedule(function()
+        CIV.despawnGroup(gname)
+        CIV.unmark(run.markId)
+        run.markId = nil
+        CIV.msgAll("CONVOY ESCORT: site clear. The route is safe again.", 12)
+      end, nil, CC.ambush.clearDelay)
+      return
+    end
+  end
+  CIV.msgUnit(u, "Nothing suspicious in sight from here.", 10)
+end
+
+local function convoySprung(run, p)
+  CIV.msgAll("CONVOY ESCORT: the convoy drove into an UNREPORTED ambush at\n" ..
+    CIV.llString(p) .. "\nMission FAILED.", 20)
+  pcall(trigger.action.explosion, { x = p.x, y = p.y + 2, z = p.z }, 10)
+  if run.escortName then
+    CIV.Score.award(run.escortName, "convoyMalus", 0.5, 0.5,
+      CIV.severityMult(run.severity), "convoy lost (ambush unreported)")
+  end
+  closeRun(run, 20)
+end
+
+-- convoy loop: escort coverage, ambush lifecycle, arrival, watchdog
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, run in pairs(CVY._runs) do
+    local g = Group.getByName(run.gname)
+    local u = g and g:getUnit(1)
+    if not u or not u:isExist() then
+      CIV.msgAll("CONVOY ESCORT: convoy lost. Mission over.", 12)
+      closeRun(run, 1)
+    else
+      local p = u:getPoint()
+
+      -- escort coverage: completion quality = time on station
+      run.totalTicks = run.totalTicks + 1
+      local escorted = false
+      CIV.forEachPlayerHelo(function(h, info)
+        if not escorted and CIV.dist2D(h:getPoint(), p) <= CC.escortRadius then
+          escorted = true
+          run.escortName = info.playerName
+        end
+      end)
+      if escorted then run.escortTicks = run.escortTicks + 1 end
+
+      -- the ambush appears ahead of the convoy, just off the road
+      if run.ambushPlanned and not run.ambush and now >= run.ambushAt then
+        local v = u:getVelocity()
+        local hdg = CIV.speed(v) > 2
+          and CIV.bearingDeg(p, { x = p.x + v.x, z = p.z + v.z })
+          or CIV.bearingDeg(p, { x = run.endP.x, z = run.endP.z })
+        local ap = CIV.offsetPoint(p, hdg, CC.ambush.aheadM)
+        ap = CIV.offsetPoint(ap, hdg + (math.random(2) == 1 and 90 or -90),
+          math.random(10, CC.ambush.lateralM))
+        local agname = CIV.spawnFromTemplate(C.templates.ambush, ap)
+        if agname then
+          run.ambush = { gname = agname, point = ap, spotted = false, hinted = {} }
+          CIV.log("Convoy #" .. run.id .. ": ambush placed ahead of the route")
+        else
+          run.ambushPlanned = false
+        end
+      end
+
+      -- hints + sprung check while the ambush is live and unreported
+      local amb = run.ambush
+      local sprung = false
+      if amb and not amb.spotted then
+        CIV.forEachPlayer(function(a, info)
+          if amb.hinted[info.unitName] then return end
+          local apnt = a:getPoint()
+          if CIV.dist2D(apnt, amb.point) <= CC.ambush.hintRadius
+             and CIV.agl(apnt) <= CC.ambush.maxAGL then
+            amb.hinted[info.unitName] = true
+            CIV.msgUnit(a, "Something odd off the convoy route nearby: a " ..
+              "parked car and movement. Take a look and report it via F10.", 12)
+          end
+        end)
+        local damaged = false
+        local okSize, size = pcall(function() return g:getSize() end)
+        if okSize and run.size0 and size < run.size0 then damaged = true end
+        if damaged or CIV.dist2D(p, amb.point) <= CC.ambush.triggerRadius then
+          sprung = true
+          convoySprung(run, p)
+        end
+      end
+
+      if not sprung then
+        if CIV.dist2D(p, run.endP) <= CC.arriveRadius then
+          local quality = run.escortTicks / math.max(1, run.totalTicks)
+          if run.escortName then
+            CIV.Score.award(run.escortName, "convoy", quality, 0.5,
+              CIV.severityMult(run.severity),
+              string.format("convoy escort (coverage %d%%)",
+                math.floor(quality * 100)))
+          end
+          CIV.msgAll("CONVOY ESCORT: the transport reached " .. run.endName ..
+            ". Detainees delivered." ..
+            (run.escortName and "" or " No escort was on station."), 15)
+          closeRun(run, 60)
+        else
+          -- stall watchdog (same "On Road" caveat as the chase)
+          if run.lastPos and CIV.dist2D(p, run.lastPos) < 5 then
+            run.stalledSince = run.stalledSince or now
+            if now - run.stalledSince > 60 then
+              run.stalledSince = nil
+              run.rekicks = run.rekicks + 1
+              if run.rekicks >= 2 then run.roadAction = "Off Road" end
+              convoyRoute(run, p)
+              CIV.dbg("Convoy #" .. run.id .. " re-kicked (watchdog)")
+            end
+          else
+            run.stalledSince = nil
+          end
+          run.lastPos = { x = p.x, y = p.y, z = p.z }
+        end
+      end
+    end
+  end
+  return t + 5
+end, nil, 20)
+
+----------------------------------------------------------------------
 -- F10 MENU + EVENT STARTERS
 ----------------------------------------------------------------------
 
@@ -3994,10 +4292,14 @@ CIV.Menu_register(function(gid, uname)
       and ("Team aboard: " .. st.squad .. " operators.")
       or "No team aboard.", 10)
   end)
+  missionCommands.addCommandForGroup(gid, "Convoy: report suspicious activity",
+    sub, CVY.report, uname)
 end)
 
 CIV.EventStarters.chase = { label = "Police chase", fn = PL.startChase }
 CIV.EventStarters.swat = { label = "SWAT scenario", fn = SW.startScenario }
+CIV.EventStarters.convoy = { label = "Prisoner convoy escort",
+  fn = function() return CVY.start() end }
 
 CIV.log("CivilPolice loaded")
 
@@ -5895,6 +6197,7 @@ CIV.log("CivilSeaOps loaded")
 --   civil casevac [sev]       battlefield casualty at the marker
 --   civil swat [sev]          SWAT objective at the marker
 --   civil chase [sev]         chase from the crossroad nearest the marker
+--   civil convoy [sev]        prisoner convoy run (uses the Convoy Start/End zones)
 --   civil recon [sev]         corridor anomaly at the marker
 --   civil vip [sev]           VIP shuttle from the pad nearest the marker
 --   civil transfer [sev]      medical transfer from the pad nearest the marker
@@ -6041,6 +6344,16 @@ local function cancelNearest(point)
         function() CIV.MedTransfer.cancel(job) end)
     end
   end
+  if CIV.Convoy then
+    for _, run in pairs(CIV.Convoy._runs) do
+      local g = Group.getByName(run.gname)
+      local u = g and g:getUnit(1)
+      if u and u:isExist() then
+        consider(u:getPoint(), "prisoner convoy #" .. run.id,
+          function() CIV.Convoy.cancel(run) end)
+      end
+    end
+  end
   if CIV.CoastGuard then
     for _, task in pairs(CIV.CoastGuard._tasks) do
       local g = Group.getByName(task.ship.gname)
@@ -6115,6 +6428,14 @@ commands.transfer = function(args, point)
   if not CIV.MedTransfer.start({ nearPoint = point,
       severity = toSeverity(args[1]) }) then
     say("transfer command failed (needs at least 2 CIVIL VIP Pad zones).")
+  end
+end
+
+commands.convoy = function(args, _)
+  if not (CIV.Convoy and CIV.Convoy.start) then moduleMissing("police") return end
+  if not CIV.Convoy.start({ severity = toSeverity(args[1]) }) then
+    say("convoy command failed (needs CIVIL Convoy Start and End zones, " ..
+      "or the cap is reached).")
   end
 end
 
@@ -6226,7 +6547,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|recon|vip|transfer|inspect [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|inspect [severity]\n" ..
     CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..

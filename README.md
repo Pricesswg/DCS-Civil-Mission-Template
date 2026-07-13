@@ -95,6 +95,8 @@ rescue reports name the specific region.
 | `CIVIL Sea Lane ...` | Sea ops | 2+ | route waypoints: ships walk nearby lanes like the police chase walks crossroads |
 | `CIVIL Sea Despawn ...` | Sea ops | 1+ | merchant route END: ships are cleared on arrival |
 | `CIVIL Restricted ...` | Air traffic | 0+ | military areas closed to civil traffic; strayed flights loiter inside until intercepted |
+| `CIVIL Convoy Start ...` | Police | 1+ | prisoner convoy departure (police station, courthouse); route runs "On Road" to the destination |
+| `CIVIL Convoy End ...` | Police | 1+ | prisoner convoy destination (prison, courthouse) |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -130,6 +132,8 @@ used when absent):**
 | `CIVIL Skydiver ...` | landed jumpers | `Soldier M4` |
 | `CIVIL Merchant ...` | sea traffic freighter | `HandyWind` |
 | `CIVIL Airliner ...` | ambient air traffic (type + livery source) | `Yak-40` |
+| `CIVIL Convoy ...` | prisoner transport: police car, school bus, tail car (in that order) | `LandRover_ah` + `IKARUS Bus` + `LandRover_ah` |
+| `CIVIL Ambush ...` | roadside ambush: two armed men and a car. Build it under a HOSTILE country and the gunmen actually open fire; the scripted outcome works either way | none (no template = no ambush, plain escort) |
 
 **Building a template**: create a group of the right category (ground or
 ship), name the GROUP with the prefix, tick LATE ACTIVATION, place it
@@ -239,6 +243,19 @@ nearest fire from below 600 m. While the mark is hot (5 min), every drop
 on that fire scores +25%, and the marker earns the assist when the fire
 goes out. Types in `fire.airAttack`, TO VALIDATE per mod.
 
+**Prisoner convoy escort** (helicopters): a police car, the school bus
+with the detainees and a tail car drive from a `CIVIL Convoy Start` zone
+to a `CIVIL Convoy End` zone on the road network, and the helicopter
+shadows them (escort coverage is the completion quality). Along the way
+there is a chance (`police.convoy.ambush.chance`) an ambush appears ahead
+of the route: two armed men and a car from your `CIVIL Ambush` template,
+just off the road. Fly low over the route, catch the nudge, and REPORT it
+via `F10 -> Police / SWAT` before the convoy gets there: bonus points,
+the site gets marked on the map and the police clears it in a minute.
+Miss it and the convoy drives into the kill zone: mission FAILED, both
+groups despawn and the escorting pilot takes a points malus for the
+miss.
+
 Two more airplane jobs reward flying when nothing burns yet. **Firewatch**:
 sweeping a fire region that has no active fire keeps it watched for 15
 minutes; a fire igniting in a watched region is called in early, starts 2
@@ -288,6 +305,7 @@ civil sars 6              castaway on that water position (vessels react)
 civil casevac             battlefield casualty, severity rolled randomly
 civil swat 7              SWAT objective there (needs ~7 operators)
 civil chase 9             fast two-car convoy from the nearest crossroad
+civil convoy 7            prisoner transport run (Convoy Start -> End zones)
 civil cargo heavy 9       urgent HEAVY load there (expires in ~45 min)
 civil transfer 8          medical transfer from the pad nearest the marker
 civil inspect 7           coast guard inspection on the merchant nearest

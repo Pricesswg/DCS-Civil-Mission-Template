@@ -48,6 +48,8 @@ civil cargo heavy 9    loading point: tier light/medium/heavy/heavy_lift,
 civil recon 6          corridor anomaly at the marker
 civil vip 7            passenger shuttle, pickup at the pad nearest to
                        the marker
+civil convoy 7         prisoner transport from a Convoy Start zone to a
+                       Convoy End zone, with a possible roadside ambush
 civil transfer 8       medical transfer (air ambulance): patient from the
                        pad nearest to the marker to a distant pad, with a
                        criticality clock

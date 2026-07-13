@@ -113,6 +113,13 @@ restricted-area violators. Everything is wrapped in pcall and the module
 caps itself, so a failure degrades to "no ambient traffic" without
 touching the rest.
 
+**Convoy escort (v0.4)**: reuses the chase's "On Road" routing and
+watchdog (same known caveat) and the template cloning. Fallback vehicle
+type names TO VALIDATE: `IKARUS Bus` for the school bus, `LandRover_ah`
+for the cars. The ambush clone keeps the template's own country, so a
+hostile-country template makes the gunmen engage for real; the scripted
+proximity failure covers neutral templates too.
+
 ## Corrections / clarifications vs the concept
 
 - **`world.setPersistenceHandler`**: I found NO evidence this exists as a

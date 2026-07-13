@@ -73,6 +73,8 @@ CIV.Config = {
     seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
     seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
     restricted        = "CIVIL Restricted",           -- military areas closed to civil traffic (intercept tasks)
+    convoyStart       = "CIVIL Convoy Start",         -- prisoner convoy departure zones
+    convoyEnd         = "CIVIL Convoy End",           -- prisoner convoy destination zones
   },
 
   ------------------------------------------------------------------
@@ -93,6 +95,9 @@ CIV.Config = {
     skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
     merchant = "CIVIL Merchant",   -- ship group: sea traffic freighter
     airliner = "CIVIL Airliner",   -- plane group: ambient air traffic (type/livery source)
+    convoy   = "CIVIL Convoy",     -- vehicle group: police car, school bus, tail car (in that order)
+    ambush   = "CIVIL Ambush",     -- vehicle group: two armed men and a car; build it under a
+                                   -- HOSTILE country if you want the gunmen to actually shoot
   },
   fallbackTypes = {
     survivor   = "Soldier M4",
@@ -104,6 +109,8 @@ CIV.Config = {
     skydiver   = "Soldier M4",
     merchant   = "HandyWind",      -- stock bulk freighter, TO VALIDATE type name
     airliner   = "Yak-40",         -- stock small airliner (ambient traffic)
+    convoyCar  = "LandRover_ah",   -- convoy fallback: lead and tail car, TO VALIDATE
+    convoyBus  = "IKARUS Bus",     -- convoy fallback: the school bus, TO VALIDATE
   },
 
   -- Automatic scenery dressing of fixed zones. Everything is OFF by
@@ -162,6 +169,9 @@ CIV.Config = {
       skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
       coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
       intercept   = 14,     -- restricted-area violator identified and escorted out
+      convoy      = 18,     -- prisoner convoy escorted to destination, quality = coverage
+      convoySpot  = 8,      -- ambush reported before the convoy reached it
+      convoyMalus = -10,    -- NEGATIVE: convoy lost to an unreported ambush on your watch
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -486,6 +496,35 @@ CIV.Config = {
     -- radius, below maxAGL) keeps the pursuit on camera: while it holds
     -- contact the helicopter's pressure builds rateBonus times faster, and
     -- the watcher earns an assist when the arrest lands.
+    -- Prisoner convoy escort: a police car, the school bus with the
+    -- detainees and a tail car (build the CIVIL Convoy template in that
+    -- order) drive "On Road" from a CIVIL Convoy Start zone to a CIVIL
+    -- Convoy End zone. The helicopter shadows them. Along the way there is
+    -- a chance an AMBUSH (CIVIL Ambush template) appears ahead of the
+    -- route: spot it and report it via F10 for bonus points, and the
+    -- police clears the site after clearDelay. Miss it and the convoy
+    -- drives into it: mission FAILED, both groups despawn and the
+    -- escorting pilot takes the malus.
+    convoy = {
+      enabled      = true,
+      maxActive    = 1,
+      severity     = { min = 1, max = 10 },
+      speed        = 12,     -- m/s on road (~43 km/h: it is a bus)
+      escortRadius = 2000,   -- m, helicopter within this counts as escorting
+      arriveRadius = 300,    -- m from the destination = delivered
+      ambush = {
+        chance        = 60,   -- % per run (needs a CIVIL Ambush template)
+        delay         = { min = 120, max = 360 },  -- s into the drive before it appears
+        aheadM        = 800,  -- m ahead of the convoy when it appears
+        lateralM      = 50,   -- m off the road
+        hintRadius    = 2500, -- m, aircraft below maxAGL gets the nudge
+        maxAGL        = 600,
+        reportRadius  = 800,  -- m, F10 report valid within this
+        clearDelay    = 60,   -- s after the report before the police clears the site
+        triggerRadius = 250,  -- m, unspotted ambush this close to the convoy = sprung
+      },
+    },
+
     trafficWatch = {
       enabled   = true,
       radius    = 1800,   -- m from the fleeing vehicle: wide enough for a
@@ -524,6 +563,7 @@ CIV.Config = {
       recon       = 20,
       vip         = 20,
       inspection  = 20,
+      convoy      = 15,
       -- fires have their own dedicated scheduler (fire.autoIgnite);
       -- sea/air ambient traffic have their own spawn schedulers too
     },
@@ -1737,7 +1777,7 @@ function CIV.Score.award(playerName, taskType, quality, timeFactor, mult, label)
   CIV.log(string.format("SCORE|%s|%s|%d|q=%.2f|t=%.2f", playerName, taskType,
     points, quality or -1, timeFactor or -1))
   if CIV.Config.score.broadcast then
-    CIV.msgAll(string.format("%s completed: %s  (+%d points, total %d)",
+    CIV.msgAll(string.format("%s completed: %s  (%+d points, total %d)",
       playerName, label or taskType, points, row.points), 12)
   end
   return points

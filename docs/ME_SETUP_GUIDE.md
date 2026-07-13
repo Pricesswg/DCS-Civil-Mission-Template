@@ -82,6 +82,8 @@ in any destination zone.
 | `CIVIL Sea Lane ...` | merchant waypoints | 2+ zones tracing the shipping lane; ships walk nearby lanes (`seaOps.traffic.neighborRadius`) like the chase walks crossroads |
 | `CIVIL Sea Despawn ...` | merchant route end | on open water; ships are cleared when they arrive |
 | `CIVIL Restricted ...` | military range / no-fly | optional; ambient flights sometimes stray inside and loiter until intercepted (task armed only with a player airplane airborne) |
+| `CIVIL Convoy Start ...` | prisoner convoy departure | near the road network (police station, courthouse); the convoy drives "On Road" to the destination |
+| `CIVIL Convoy End ...` | prisoner convoy destination | near the road network (prison); same "On Road" caveat as the chase |
 | `CIVIL Cargo Destination ...` | cargo delivery | one or more destination zones; deliveries and supply airdrops count in any of them |
 | `CIVIL Medevac Point ...` | casualty recovery | "hostile"/accident LZs |
 | `CIVIL Casevac Point ...` | battlefield casualty extraction | battlefield LZs (same flow as MedEvac, hostile skin). USER-BUILT static areas: dress them with your own battlefield assets |
@@ -204,6 +206,8 @@ the event runs anyway.
 | `CIVIL Skydiver ...` | landed jumpers (ground) | `Soldier M4` |
 | `CIVIL Merchant ...` | sea traffic freighter (ship) | `HandyWind` (TO VALIDATE) |
 | `CIVIL Airliner ...` | ambient flight type/livery (plane) | `Yak-40` |
+| `CIVIL Convoy ...` | prisoner transport (vehicle): build it police car FIRST, school bus SECOND, tail car THIRD, the clone keeps the layout | `LandRover_ah` + `IKARUS Bus` + `LandRover_ah` (TO VALIDATE) |
+| `CIVIL Ambush ...` | roadside ambush (vehicle): two armed men and a car. Place the TEMPLATE under a hostile country to make the gunmen actually shoot; the scripted fail/clear works with any country | none: without the template the convoy runs unthreatened |
 
 ## 4b. Ships (regular units placed in the ME, matched by name prefix)
 
