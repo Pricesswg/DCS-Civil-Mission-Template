@@ -498,7 +498,10 @@ CIV.Config = {
     -- the watcher earns an assist when the arrest lands.
     trafficWatch = {
       enabled   = true,
-      radius    = 1200,   -- m from the fleeing vehicle
+      radius    = 1800,   -- m from the fleeing vehicle: wide enough for a
+                          -- real orbit (a light plane's standard turn is
+                          -- already a ~1.1 km circle, the tether must be
+                          -- larger than that to hold contact comfortably)
       maxAGL    = 1500,   -- m, must be below this to count as overwatch
       rateBonus = 1.5,    -- pressure build multiplier while the watch holds
     },

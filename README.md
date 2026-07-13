@@ -244,7 +244,7 @@ sweeping a fire region that has no active fire keeps it watched for 15
 minutes; a fire igniting in a watched region is called in early, starts 2
 severity points smaller and credits the patrolling pilot. **Traffic
 watch**: on a police chase, an airplane orbiting over the fugitive (within
-1.2 km, below 1500 m) keeps the pursuit on camera: the helicopter's
+1.8 km, below 1500 m) keeps the pursuit on camera: the helicopter's
 pressure builds 50% faster while the watch holds, and the watcher earns an
 assist when the arrest lands. A situation recap broadcasts every 30
 minutes, final standings at mission end; `tools/leaderboard.py` turns the
