@@ -75,6 +75,7 @@ CIV.Config = {
     restricted        = "CIVIL Restricted",           -- military areas closed to civil traffic (intercept tasks)
     convoyStart       = "CIVIL Convoy Start",         -- prisoner convoy departure zones
     convoyEnd         = "CIVIL Convoy End",           -- prisoner convoy destination zones
+    fireLZ            = "CIVIL Fire LZ",              -- optional casualty LZ next to a structural fire point
   },
 
   ------------------------------------------------------------------
@@ -315,6 +316,13 @@ CIV.Config = {
       casualtyEvent   = true,  -- spawn a MedEvac next to a structural fire
       casualtyOffsetM = 60,    -- m from the flames (hover room)
       brigadeMult     = 3.0,   -- brigade suppression multiplier on these fires
+      -- Landing point control: place an optional "CIVIL Fire LZ" zone near
+      -- the building (within lzSearchRadius) and the casualty spawns
+      -- exactly there, hand-picked in the ME instead of a blind offset
+      -- (buildings rarely leave hover room in a random direction). Either
+      -- way the point is marked with GREEN smoke at event start.
+      lzSearchRadius  = 500,
+      smokeLZ         = true,
     },
 
     -- Fire brigade: when a fire ignites, trucks depart from the nearest

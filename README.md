@@ -97,6 +97,7 @@ rescue reports name the specific region.
 | `CIVIL Restricted ...` | Air traffic | 0+ | military areas closed to civil traffic; strayed flights loiter inside until intercepted |
 | `CIVIL Convoy Start ...` | Police | 1+ | prisoner convoy departure (police station, courthouse); route runs "On Road" to the destination |
 | `CIVIL Convoy End ...` | Police | 1+ | prisoner convoy destination (prison, courthouse) |
+| `CIVIL Fire LZ ...` | Firefighting | 0+ | hand-picked casualty LZ next to a `CIVIL Fire Point Building` zone (within 500 m); marked with green smoke on the event |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -293,8 +294,12 @@ is tripled on structural fires, `fire.structural.brigadeMult`), retardant
 has no effect and the air attack does not smoke-mark them. The AIR task
 is the CASUALTY: a MedEvac opens automatically next to the burning
 building (`fire.structural`), and the rescue helicopters carry the
-injured to the hospital. The callout warns the firefighting crews
-explicitly: water is not needed there.
+injured to the hospital. The landing point gets GREEN smoke at event
+start, and you can hand-pick it: place a `CIVIL Fire LZ` zone within 500
+m of the building point and the casualty spawns exactly there instead of
+at a random offset (blind offsets near buildings can land on rooftops).
+The callout warns the firefighting crews explicitly: water is not needed
+there.
 
 ## The severity scale (1-10, all events)
 

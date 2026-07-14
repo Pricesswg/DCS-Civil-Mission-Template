@@ -185,7 +185,8 @@ function Fire.ignite(pt, severityOverride, kindOverride)
     (kindDef.structural
       and ("\nATTENTION firefighting crews: the brigade pumpers handle " ..
            "the flames. Water is NOT needed. People are injured inside: " ..
-           "the air task is the CASUALTY going out next to the building.")
+           "the air task is the CASUALTY going out next to the building. " ..
+           "The landing point is marked with GREEN smoke.")
       or ""), 20)
   CIV.log("Fire #" .. fire.id .. " (" .. kindDef.name .. ") ignited at " ..
     pt.name .. " severity " .. fire.severity)
@@ -200,12 +201,28 @@ function Fire.ignite(pt, severityOverride, kindOverride)
   -- task is the MedEvac, the brigade owns the flames. Guarded: without
   -- the rescue module the fire simply burns until the trucks finish it.
   if kindDef.structural and CF.structural.casualtyEvent and CIV.Rescue then
-    local cp = CIV.offsetPoint(fire.point, math.random(0, 359),
-      CF.structural.casualtyOffsetM)
+    -- landing point: a hand-placed CIVIL Fire LZ zone near the building
+    -- wins (a blind offset can land on a rooftop); else a spot just off
+    -- the flames. Green smoke marks it either way.
+    local cp
+    local lz = CIV.Zones.nearest(C.zones.fireLZ, fire.point)
+    if lz and CIV.dist2D({ x = lz.center.x, z = lz.center.z }, fire.point)
+       <= CF.structural.lzSearchRadius then
+      cp = { x = lz.center.x,
+             y = land.getHeight({ x = lz.center.x, y = lz.center.z }),
+             z = lz.center.z }
+    else
+      cp = CIV.offsetPoint(fire.point, math.random(0, 359),
+        CF.structural.casualtyOffsetM)
+    end
     local ok, evt = pcall(CIV.Rescue.startEvent, "MEDEVAC",
       { point = cp, severity = math.ceil(fire.severity) })
     if ok and evt then
-      CIV.log("Fire #" .. fire.id .. ": structural casualty MedEvac opened")
+      if CF.structural.smokeLZ then
+        pcall(trigger.action.smoke, cp, trigger.smokeColor.Green)
+      end
+      CIV.log("Fire #" .. fire.id .. ": structural casualty MedEvac opened" ..
+        (lz and " on " .. lz.name or ""))
     end
   end
   return fire

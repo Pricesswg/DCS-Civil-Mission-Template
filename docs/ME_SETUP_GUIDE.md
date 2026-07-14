@@ -67,6 +67,7 @@ in any destination zone.
 | `CIVIL Fire Region ...` | firefighting macro-region(s) | large; enable the spotter and the C-130 line drop; several regions of the same type are fine |
 | `CIVIL Fire Point ...` | fire ignition points | forest/fields, away from buildings and roads. A name containing `Building` (or `Forest`/`Landfill`/`Industrial`) FORCES that kind: put `CIVIL Fire Point Building ...` zones ON real buildings for structural fires. There the brigade extinguishes on its own (boosted) and a MedEvac opens next to the building: the AIR task is the casualty, not the water |
 | `CIVIL Fire Station ...` | fire brigade depots | trucks depart from the nearest one and drive "On Road" to the fire |
+| `CIVIL Fire LZ ...` | structural casualty LZ | optional, within 500 m of a `CIVIL Fire Point Building` zone: the casualty spawns exactly there (pick a clear spot, blind offsets near buildings can land on rooftops). Green smoke marks it on the event |
 | `CIVIL Water Point ...` | helicopter water pickup | on a body of water, with maneuvering room |
 | `CIVIL C130 Reload ...` | C-130 retardant reload apron(s) | reachable on the ground. USER-BUILT static area: decorate it yourself (`autoDress.c130Reload = false` by default) |
 | `CIVIL SAR Mountain Region ...` + `CIVIL SAR Mountain Point ...` | mountain SAR | region(s) can cover separate ranges; points reachable in a hover |
