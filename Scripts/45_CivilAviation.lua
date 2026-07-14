@@ -572,8 +572,9 @@ end
 ----------------------------------------------------------------------
 
 local CM = C.media
-local filmTime = {}   -- unitName .. "|" .. eventKey -> seconds
-local aired = {}      -- eventKey -> true (one story per event)
+local filmTime = {}    -- unitName .. "|" .. eventKey -> seconds
+local actionTime = {}  -- unitName .. "|" .. eventKey -> seconds with responders in frame
+local aired = {}       -- eventKey -> true (one story per event)
 
 -- active events worth filming: { key, point, label }. Every module lookup
 -- is guarded, so leaving intervention files out of the load list is safe.
@@ -616,6 +617,20 @@ if CM.enabled then
   CIV.schedule(function(_, t)
     local events = filmableEvents()
     if #events > 0 then
+      -- responders on scene, per event: player aircraft close to the
+      -- action (the filmer checks against this list, excluding itself)
+      local onScene = {}
+      for _, evt in ipairs(events) do
+        local names = {}
+        CIV.forEachPlayer(function(a, ainfo)
+          if ainfo.category ~= Unit.Category.HELICOPTER
+             and ainfo.category ~= Unit.Category.AIRPLANE then return end
+          if CIV.dist2D(a:getPoint(), evt.point) <= CM.actionRadius then
+            names[ainfo.unitName] = true
+          end
+        end)
+        onScene[evt.key] = names
+      end
       -- helicopters AND airplanes: a trainer orbiting the ring films too
       CIV.forEachPlayer(function(u, info)
         if info.category ~= Unit.Category.HELICOPTER
@@ -628,12 +643,24 @@ if CM.enabled then
             if d >= CM.minDist and d <= CM.maxDist then
               local k = info.unitName .. "|" .. evt.key
               filmTime[k] = (filmTime[k] or 0) + 5
+              -- ACTION FOOTAGE: another aircraft working the event while
+              -- you film makes the story worth more
+              for name in pairs(onScene[evt.key] or {}) do
+                if name ~= info.unitName then
+                  actionTime[k] = (actionTime[k] or 0) + 5
+                  break
+                end
+              end
               if filmTime[k] >= CM.filmSeconds then
                 aired[evt.key] = true
-                CIV.Score.award(info.playerName, "media", 0.7, 0.5, 1,
-                  "live coverage: " .. evt.label)
+                local frac = math.min(1, (actionTime[k] or 0) / CM.filmSeconds)
+                CIV.Score.award(info.playerName, "media", 0.7, 0.5,
+                  1 + CM.actionBonus * frac,
+                  string.format("live coverage: %s (action footage %d%%)",
+                    evt.label, math.floor(frac * 100)))
                 CIV.msgAll("LIVE ON AIR: " .. info.playerName ..
-                  " broadcast footage of the " .. evt.label .. ".", 15)
+                  " broadcast footage of the " .. evt.label ..
+                  (frac > 0.5 and " with the responders in frame." or "."), 15)
               end
             end
           end

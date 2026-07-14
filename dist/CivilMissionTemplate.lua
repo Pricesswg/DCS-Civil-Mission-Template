@@ -289,16 +289,29 @@ CIV.Config = {
     --   retardant = false  C-130 line drops and retardant airdrops do not
     --                      suppress it (helicopter water and the ground
     --                      brigade still do)
+    --
+    -- Per-kind VISUAL behavior:
+    --   startSize = 1..4  preset step every column STARTS at (default 1 =
+    --                     small). Landfill and industrial fires burn hard
+    --                     from the first minute: they start LARGE and age
+    --                     to huge.
+    --   compact = true    extra columns pile up almost on the same spot:
+    --                     more total smoke, same footprint. For fires that
+    --                     get contained and do not spread (dumps, plants,
+    --                     buildings). Forest fires keep spreading over the
+    --                     zone instead.
     kinds = {
       { name = "forest fire",     weight = 70, smokeOnly = false, growMult = 1.0, match = "forest" },
-      { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill" },
-      { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial" },
+      { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill",
+        startSize = 3, compact = true },
+      { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial",
+        startSize = 3, compact = true },
       -- Building fires NEVER roll on generic points (weight 0): they only
       -- ignite on fire points whose zone name contains "building", or on
       -- GM command. Structural firefighting is precision work: helicopter
       -- drops and the ground brigade only, no retardant, no smoke marking.
       { name = "building fire",   weight = 0,  smokeOnly = false, growMult = 0.8, match = "building",
-        airAttack = false, retardant = false },
+        airAttack = false, retardant = false, compact = true },
     },
 
     -- Fire brigade: when a fire ignites, trucks depart from the nearest
@@ -762,6 +775,12 @@ CIV.Config = {
     maxDist     = 3000,   -- m, farther than this the shot is useless
     minAGL      = 100,    -- m
     filmSeconds = 300,
+    -- ACTION FOOTAGE: while you film, responders actually working the
+    -- event (any OTHER player aircraft within actionRadius of it) make
+    -- the story worth more, up to +actionBonus on the score. Filming an
+    -- empty fire pays less than filming the helicopters fighting it.
+    actionRadius = 2000,  -- m from the event
+    actionBonus  = 0.5,   -- max score bonus (+50% with responders in frame the whole time)
   },
 
   ------------------------------------------------------------------
@@ -2102,8 +2121,11 @@ local regionPatrols = {}
 -- COUNT, age controls the column SIZE.
 local function presetFor(effect, kindDef)
   local age = timer.getTime() - effect.bornAt
-  local preset = math.max(1, math.min(4,
-    1 + math.floor(age / CF.visuals.escalateEvery)))
+  -- landfill/industrial columns start LARGE (startSize 3) and age to
+  -- huge; a knockback never shrinks them below their starting size
+  local start = (kindDef and kindDef.startSize) or 1
+  local preset = math.max(start, math.min(4,
+    start + math.floor(age / CF.visuals.escalateEvery)))
   if kindDef and kindDef.smokeOnly then preset = preset + 4 end
   return preset
 end
@@ -2132,8 +2154,15 @@ local function refreshVisuals(fire)
   for i = #fire.effects + 1, wanted do
     local p = fire.point
     if i > 1 then
-      p = CIV.offsetPoint(fire.point, math.random(0, 359),
-        math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
+      if fire.kindDef.compact then
+        -- contained fires (dumps, plants, buildings) pile the columns on
+        -- nearly the same spot: more total smoke, same footprint
+        p = CIV.offsetPoint(fire.point, math.random(0, 359), math.random(5, 15))
+      else
+        -- spreading fires (forest) light sub-fires across the zone
+        p = CIV.offsetPoint(fire.point, math.random(0, 359),
+          math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
+      end
     end
     -- a NEW column starts small and ages on its own clock, same
     -- progression as the first one
@@ -5283,8 +5312,9 @@ end
 ----------------------------------------------------------------------
 
 local CM = C.media
-local filmTime = {}   -- unitName .. "|" .. eventKey -> seconds
-local aired = {}      -- eventKey -> true (one story per event)
+local filmTime = {}    -- unitName .. "|" .. eventKey -> seconds
+local actionTime = {}  -- unitName .. "|" .. eventKey -> seconds with responders in frame
+local aired = {}       -- eventKey -> true (one story per event)
 
 -- active events worth filming: { key, point, label }. Every module lookup
 -- is guarded, so leaving intervention files out of the load list is safe.
@@ -5327,6 +5357,20 @@ if CM.enabled then
   CIV.schedule(function(_, t)
     local events = filmableEvents()
     if #events > 0 then
+      -- responders on scene, per event: player aircraft close to the
+      -- action (the filmer checks against this list, excluding itself)
+      local onScene = {}
+      for _, evt in ipairs(events) do
+        local names = {}
+        CIV.forEachPlayer(function(a, ainfo)
+          if ainfo.category ~= Unit.Category.HELICOPTER
+             and ainfo.category ~= Unit.Category.AIRPLANE then return end
+          if CIV.dist2D(a:getPoint(), evt.point) <= CM.actionRadius then
+            names[ainfo.unitName] = true
+          end
+        end)
+        onScene[evt.key] = names
+      end
       -- helicopters AND airplanes: a trainer orbiting the ring films too
       CIV.forEachPlayer(function(u, info)
         if info.category ~= Unit.Category.HELICOPTER
@@ -5339,12 +5383,24 @@ if CM.enabled then
             if d >= CM.minDist and d <= CM.maxDist then
               local k = info.unitName .. "|" .. evt.key
               filmTime[k] = (filmTime[k] or 0) + 5
+              -- ACTION FOOTAGE: another aircraft working the event while
+              -- you film makes the story worth more
+              for name in pairs(onScene[evt.key] or {}) do
+                if name ~= info.unitName then
+                  actionTime[k] = (actionTime[k] or 0) + 5
+                  break
+                end
+              end
               if filmTime[k] >= CM.filmSeconds then
                 aired[evt.key] = true
-                CIV.Score.award(info.playerName, "media", 0.7, 0.5, 1,
-                  "live coverage: " .. evt.label)
+                local frac = math.min(1, (actionTime[k] or 0) / CM.filmSeconds)
+                CIV.Score.award(info.playerName, "media", 0.7, 0.5,
+                  1 + CM.actionBonus * frac,
+                  string.format("live coverage: %s (action footage %d%%)",
+                    evt.label, math.floor(frac * 100)))
                 CIV.msgAll("LIVE ON AIR: " .. info.playerName ..
-                  " broadcast footage of the " .. evt.label .. ".", 15)
+                  " broadcast footage of the " .. evt.label ..
+                  (frac > 0.5 and " with the responders in frame." or "."), 15)
               end
             end
           end

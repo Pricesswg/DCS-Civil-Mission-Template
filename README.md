@@ -176,7 +176,12 @@ anomaly, report it via F10 before it expires), VIP shuttle (board a
 passenger at one pad, deliver to another; ride comfort is the score:
 acceleration spikes cost you the tip) and passive media coverage (hold in
 the 1-3 km filming ring around any active event for 5 minutes and the
-story airs).
+story airs). Filming an empty event pays the base rate; **action
+footage** pays more: while another player aircraft is working the event
+within `media.actionRadius` (a helicopter dropping water, the C-130 on
+its line run), your footage accumulates a bonus worth up to
++`media.actionBonus` (default +50%) on the story. The TV helicopter
+earns the most by staying with the response, not by circling ruins.
 
 **Medical transfer (air ambulance)**: an event CHAIN on the rescue module.
 When a severity 7+ patient reaches a hospital, there is a chance
@@ -269,8 +274,13 @@ logged SCORE lines into a cross-session ranking.
 
 **Fire kinds**: each ignition rolls what is burning (`fire.kinds`), with
 forest fires dominating (70%), plus landfill (thick dark smoke, slow) and
-industrial (fast growth). The report and the F10 mark name the kind, so
-players can tell from afar what they are heading into.
+industrial (fast growth). The report and the F10 mark name the kind, and
+the SMOKE ITSELF tells the story from afar: a forest fire starts small,
+grows with time and spreads new columns across the zone; landfill and
+industrial fires burn hard from the first minute (columns start LARGE and
+age to huge) but stay contained, piling their extra smoke on nearly the
+same spot instead of spreading. Suppression knockback never shrinks a
+contained fire below its starting size.
 
 A fire POINT can force its kind through its zone name: any `CIVIL Fire
 Point` whose name contains `Building` (or `Forest`, `Landfill`,

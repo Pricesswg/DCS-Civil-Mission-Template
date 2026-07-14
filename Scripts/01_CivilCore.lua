@@ -279,16 +279,29 @@ CIV.Config = {
     --   retardant = false  C-130 line drops and retardant airdrops do not
     --                      suppress it (helicopter water and the ground
     --                      brigade still do)
+    --
+    -- Per-kind VISUAL behavior:
+    --   startSize = 1..4  preset step every column STARTS at (default 1 =
+    --                     small). Landfill and industrial fires burn hard
+    --                     from the first minute: they start LARGE and age
+    --                     to huge.
+    --   compact = true    extra columns pile up almost on the same spot:
+    --                     more total smoke, same footprint. For fires that
+    --                     get contained and do not spread (dumps, plants,
+    --                     buildings). Forest fires keep spreading over the
+    --                     zone instead.
     kinds = {
       { name = "forest fire",     weight = 70, smokeOnly = false, growMult = 1.0, match = "forest" },
-      { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill" },
-      { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial" },
+      { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill",
+        startSize = 3, compact = true },
+      { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial",
+        startSize = 3, compact = true },
       -- Building fires NEVER roll on generic points (weight 0): they only
       -- ignite on fire points whose zone name contains "building", or on
       -- GM command. Structural firefighting is precision work: helicopter
       -- drops and the ground brigade only, no retardant, no smoke marking.
       { name = "building fire",   weight = 0,  smokeOnly = false, growMult = 0.8, match = "building",
-        airAttack = false, retardant = false },
+        airAttack = false, retardant = false, compact = true },
     },
 
     -- Fire brigade: when a fire ignites, trucks depart from the nearest
@@ -752,6 +765,12 @@ CIV.Config = {
     maxDist     = 3000,   -- m, farther than this the shot is useless
     minAGL      = 100,    -- m
     filmSeconds = 300,
+    -- ACTION FOOTAGE: while you film, responders actually working the
+    -- event (any OTHER player aircraft within actionRadius of it) make
+    -- the story worth more, up to +actionBonus on the score. Filming an
+    -- empty fire pays less than filming the helicopters fighting it.
+    actionRadius = 2000,  -- m from the event
+    actionBonus  = 0.5,   -- max score bonus (+50% with responders in frame the whole time)
   },
 
   ------------------------------------------------------------------

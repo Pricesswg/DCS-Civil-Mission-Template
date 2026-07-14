@@ -58,8 +58,11 @@ local regionPatrols = {}
 -- COUNT, age controls the column SIZE.
 local function presetFor(effect, kindDef)
   local age = timer.getTime() - effect.bornAt
-  local preset = math.max(1, math.min(4,
-    1 + math.floor(age / CF.visuals.escalateEvery)))
+  -- landfill/industrial columns start LARGE (startSize 3) and age to
+  -- huge; a knockback never shrinks them below their starting size
+  local start = (kindDef and kindDef.startSize) or 1
+  local preset = math.max(start, math.min(4,
+    start + math.floor(age / CF.visuals.escalateEvery)))
   if kindDef and kindDef.smokeOnly then preset = preset + 4 end
   return preset
 end
@@ -88,8 +91,15 @@ local function refreshVisuals(fire)
   for i = #fire.effects + 1, wanted do
     local p = fire.point
     if i > 1 then
-      p = CIV.offsetPoint(fire.point, math.random(0, 359),
-        math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
+      if fire.kindDef.compact then
+        -- contained fires (dumps, plants, buildings) pile the columns on
+        -- nearly the same spot: more total smoke, same footprint
+        p = CIV.offsetPoint(fire.point, math.random(0, 359), math.random(5, 15))
+      else
+        -- spreading fires (forest) light sub-fires across the zone
+        p = CIV.offsetPoint(fire.point, math.random(0, 359),
+          math.random(30, math.max(40, math.floor(fire.pt.radius * 0.8))))
+      end
     end
     -- a NEW column starts small and ages on its own clock, same
     -- progression as the first one
