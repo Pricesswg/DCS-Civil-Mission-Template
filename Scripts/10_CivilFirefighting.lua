@@ -110,11 +110,37 @@ local function refreshVisuals(fire)
   end
 end
 
-function Fire.ignite(pt, severityOverride)
+-- a fire point forces its kind when its zone name contains the kind's
+-- match fragment ("CIVIL Fire Point Building Hotel" -> building fire)
+local function kindForPointName(name)
+  local lname = string.lower(tostring(name or ""))
+  for _, kind in ipairs(CF.kinds) do
+    if kind.match and string.find(lname, kind.match, 1, true) then
+      return kind
+    end
+  end
+  return nil
+end
+
+-- GM kind lookup by fragment ("building" -> the building fire kind)
+function Fire.kindByFragment(fragment)
+  if not fragment then return nil end
+  fragment = string.lower(fragment)
+  for _, kind in ipairs(CF.kinds) do
+    if string.find(kind.name, fragment, 1, true)
+       or (kind.match and string.find(kind.match, fragment, 1, true)) then
+      return kind
+    end
+  end
+  return nil
+end
+
+function Fire.ignite(pt, severityOverride, kindOverride)
   Fire._fid = Fire._fid + 1
-  -- kind picked by weight: forest (fire), landfill (dark smoke, slow),
-  -- industrial (fast growth); tells the players from afar what is burning
-  local kindDef = CIV.weightedPick(CF.kinds)
+  -- kind: forced by the GM, else by the point's zone name, else rolled by
+  -- weight (forest mostly; building fires never roll, weight 0)
+  local kindDef = kindOverride or kindForPointName(pt.name)
+    or CIV.weightedPick(CF.kinds)
   local fire = {
     id = Fire._fid, pt = pt, kindDef = kindDef,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
@@ -145,7 +171,11 @@ function Fire.ignite(pt, severityOverride)
     string.upper(kindDef.name) .. " " .. pt.name, "fire")
   CIV.msgAll(string.upper(kindDef.name) .. " reported at " .. pt.name ..
     " (" .. Fire.severityLabel(fire) .. ")\n" .. CIV.coordText(fire.point) ..
-    "\nFire zone highlighted on the F10 map.", 20)
+    "\nFire zone highlighted on the F10 map." ..
+    (kindDef.retardant == false
+      and "\nSTRUCTURAL fire: helicopter drops and ground crews only " ..
+          "(retardant and air-attack marking are not used on buildings)."
+      or ""), 20)
   CIV.log("Fire #" .. fire.id .. " (" .. kindDef.name .. ") ignited at " ..
     pt.name .. " severity " .. fire.severity)
   if fire.earlyBy then
@@ -165,14 +195,15 @@ function Fire.igniteRandom()
   return Fire.ignite(pt)
 end
 
--- command center: ignite at an arbitrary commanded position
-function Fire.igniteAt(point, severity)
+-- command center: ignite at an arbitrary commanded position, optionally
+-- forcing the kind ("civil fire building 7")
+function Fire.igniteAt(point, severity, kindDef)
   Fire._fid = Fire._fid + 1
   local pt = {
     name = "GM fire " .. Fire._fid, radius = 150,
     point = { x = point.x, y = CIV.groundY(point), z = point.z },
   }
-  return Fire.ignite(pt, severity)
+  return Fire.ignite(pt, severity, kindDef)
 end
 
 local function extinguish(fire, byWhom)
@@ -202,9 +233,13 @@ end
 
 -- Apply suppression at a point (amount in severity units). Returns the
 -- fire hit (or nil). Score attribution is the caller's job.
-function Fire.applyWater(point, amount, byWhom)
+-- source "retardant" (C-130 line drops, retardant airdrops) does NOT work
+-- on kinds flagged retardant = false (building fires): those are
+-- helicopter water and ground brigade work only.
+function Fire.applyWater(point, amount, byWhom, source)
   for _, fire in pairs(Fire._fires) do
-    if CIV.dist2D(point, fire.point) <= CF.dropRadius then
+    if CIV.dist2D(point, fire.point) <= CF.dropRadius
+       and not (source == "retardant" and fire.kindDef.retardant == false) then
       fire.severity = fire.severity - amount
       if fire.severity <= 0 then
         extinguish(fire, byWhom)
@@ -628,7 +663,8 @@ CIV.schedule(function(_, t)
         local agl = CIV.agl(p)
         if agl >= CF.c130DropAGL.min and agl <= CF.c130DropAGL.max then
           local info = CIV.players[uname]
-          local fire = Fire.applyWater(p, CF.c130DropPerSec, info and info.playerName)
+          local fire = Fire.applyWater(p, CF.c130DropPerSec,
+            info and info.playerName, "retardant")
           if fire then
             st.dropRun.hits = st.dropRun.hits + 1
             st.dropRun.maxSev = math.max(st.dropRun.maxSev,
@@ -657,7 +693,7 @@ if CF.airdrop.enabled then
   local function retardantOnTarget(impact)
     local playerInfo = CIV.nearestPlayerAirplane(impact, CF.airdrop.creditRadius)
     local fire = Fire.applyWater(impact, CF.airdrop.severityPerContainer,
-      playerInfo and playerInfo.playerName)
+      playerInfo and playerInfo.playerName, "retardant")
     if fire and playerInfo then
       local preHit = fire.severity + CF.airdrop.severityPerContainer
       CIV.Score.award(playerInfo.playerName, "fireC130",
@@ -727,13 +763,24 @@ local function airAttackMark(uname)
     return
   end
   local best, bestDist = nil, CF.airAttack.markRadius
+  local skippedStructural = false
   for _, fire in pairs(Fire._fires) do
     local d = CIV.dist2D(p, fire.point)
-    if d < bestDist then best, bestDist = fire, d end
+    if d < bestDist then
+      -- structural fires are not smoke-marked: no drops to coordinate there
+      if fire.kindDef.airAttack == false then
+        skippedStructural = true
+      else
+        best, bestDist = fire, d
+      end
+    end
   end
   if not best then
-    CIV.msgUnit(u, "No active fire within " ..
-      math.floor(CF.airAttack.markRadius / 1000) .. " km.", 10)
+    CIV.msgUnit(u, skippedStructural
+      and ("The fire nearby is STRUCTURAL: air attack does not mark " ..
+        "building fires (helicopters and ground crews handle those).")
+      or ("No active fire within " ..
+        math.floor(CF.airAttack.markRadius / 1000) .. " km."), 10)
     return
   end
   best.coordination = {

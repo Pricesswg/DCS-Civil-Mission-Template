@@ -25,7 +25,9 @@ crews respond on their own but they are slow: helicopters pick up water
 hovering over a water point, the C-130 reloads retardant on the ground and
 drops it in a line run at 150-250 m AGL, or airdrops retardant drums.
 Forest fires burn bright; a landfill fire is a slow dark smoke column; an
-industrial fire grows fast. The report tells you which one you are facing.
+industrial fire grows fast; a BUILDING fire is precision work: retardant
+and air-attack marking do not work there, it is helicopter drops and
+ground crews only. The report tells you which one you are facing.
 Read the smoke: a fresh column is small and towers in about 20 minutes
 if nobody works it, and every good hit visibly knocks it back a size.
 

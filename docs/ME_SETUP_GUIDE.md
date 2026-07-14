@@ -65,7 +65,7 @@ in any destination zone.
 | Prefix / zone name | Use | Placement notes |
 |---|---|---|
 | `CIVIL Fire Region ...` | firefighting macro-region(s) | large; enable the spotter and the C-130 line drop; several regions of the same type are fine |
-| `CIVIL Fire Point ...` | fire ignition points | forest/fields, away from buildings and roads |
+| `CIVIL Fire Point ...` | fire ignition points | forest/fields, away from buildings and roads. A name containing `Building` (or `Forest`/`Landfill`/`Industrial`) FORCES that kind: put `CIVIL Fire Point Building ...` zones ON real buildings for structural fires (helicopter + brigade only: no retardant, no air-attack mark) |
 | `CIVIL Fire Station ...` | fire brigade depots | trucks depart from the nearest one and drive "On Road" to the fire |
 | `CIVIL Water Point ...` | helicopter water pickup | on a body of water, with maneuvering room |
 | `CIVIL C130 Reload ...` | C-130 retardant reload apron(s) | reachable on the ground. USER-BUILT static area: decorate it yourself (`autoDress.c130Reload = false` by default) |

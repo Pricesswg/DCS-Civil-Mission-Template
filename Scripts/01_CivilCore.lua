@@ -269,10 +269,26 @@ CIV.Config = {
     -- Fire kinds, picked by weight at ignition. smokeOnly kinds use the
     -- thick-smoke effect presets (a dump burns dark and slow), growMult
     -- speeds up or slows down the severity growth cadence.
+    --
+    -- A fire POINT can force its kind: if the zone name contains a kind's
+    -- match fragment ("CIVIL Fire Point Building Hotel"), every ignition
+    -- there is that kind. The GM can also force it: "civil fire building 7".
+    --
+    -- Per-kind capability flags (default true when omitted):
+    --   airAttack = false  the smoke-mark pass does not work on this kind
+    --   retardant = false  C-130 line drops and retardant airdrops do not
+    --                      suppress it (helicopter water and the ground
+    --                      brigade still do)
     kinds = {
-      { name = "forest fire",     weight = 60, smokeOnly = false, growMult = 1.0 },
-      { name = "landfill fire",   weight = 20, smokeOnly = true,  growMult = 0.6 },
-      { name = "industrial fire", weight = 20, smokeOnly = false, growMult = 1.5 },
+      { name = "forest fire",     weight = 70, smokeOnly = false, growMult = 1.0, match = "forest" },
+      { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill" },
+      { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial" },
+      -- Building fires NEVER roll on generic points (weight 0): they only
+      -- ignite on fire points whose zone name contains "building", or on
+      -- GM command. Structural firefighting is precision work: helicopter
+      -- drops and the ground brigade only, no retardant, no smoke marking.
+      { name = "building fire",   weight = 0,  smokeOnly = false, growMult = 0.8, match = "building",
+        airAttack = false, retardant = false },
     },
 
     -- Fire brigade: when a fire ignites, trucks depart from the nearest

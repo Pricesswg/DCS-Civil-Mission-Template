@@ -12,7 +12,8 @@
 -- prefix (default "civil"), at the position where the effect should
 -- happen. The marker is consumed (removed) once executed.
 --
---   civil fire [sev]          wildfire at the marker
+--   civil fire [kind] [sev]   wildfire at the marker; kind is optional
+--                             (forest/landfill/industrial/building)
 --   civil sarm [sev]          mountain SAR subject at the marker
 --   civil sars [sev]          sea SAR subject at the marker (must be water)
 --   civil medevac [sev]       MedEvac casualty at the marker
@@ -200,9 +201,22 @@ local function moduleMissing(name)
   say(name .. " module is not loaded in this mission.")
 end
 
+-- civil fire [kind] [sev]: the kind word is optional ("civil fire 7",
+-- "civil fire building 7", "civil fire landfill"). Building fires only
+-- start this way or on dedicated fire points: they never roll randomly.
 commands.fire = function(args, point)
   if not CIV.Fire then moduleMissing("firefighting") return end
-  local fire = CIV.Fire.igniteAt(point, toSeverity(args[1]))
+  local kind, sev = nil, toSeverity(args[1])
+  if args[1] and not sev then
+    kind = CIV.Fire.kindByFragment(args[1])
+    if not kind then
+      say("unknown fire kind '" .. args[1] ..
+        "' (forest/landfill/industrial/building).")
+      return
+    end
+    sev = toSeverity(args[2])
+  end
+  local fire = CIV.Fire.igniteAt(point, sev, kind)
   if not fire then say("fire command failed.") end
 end
 

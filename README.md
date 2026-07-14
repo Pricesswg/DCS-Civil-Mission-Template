@@ -71,7 +71,7 @@ rescue reports name the specific region.
 | Zone name / prefix | Module | Qty | Placement |
 |---|---|---|---|
 | `CIVIL Fire Region ...` | Firefighting | 1+ | macro-region(s) containing the fire points; enable the spotter role and the C-130 line drop |
-| `CIVIL Fire Point ...` | Firefighting | 3+ | curated ignition points: forest/fields, clear of buildings and roads |
+| `CIVIL Fire Point ...` | Firefighting | 3+ | curated ignition points: forest/fields, clear of buildings and roads. A name containing `Building`/`Landfill`/`Industrial`/`Forest` FORCES that kind on the point (aim building fires at real buildings) |
 | `CIVIL Fire Station ...` | Firefighting | 1+ | fire brigade depots; trucks depart from the nearest one and drive "On Road" to the fire |
 | `CIVIL Water Point ...` | Firefighting | 1+ | helicopter water pickup, on a body of water with hover room |
 | `CIVIL C130 Reload ...` | Firefighting | 1+ | retardant reload apron, reachable by taxi. **User-built static area**: decorate it yourself (auto-dressing off by default) |
@@ -267,10 +267,20 @@ assist when the arrest lands. A situation recap broadcasts every 30
 minutes, final standings at mission end; `tools/leaderboard.py` turns the
 logged SCORE lines into a cross-session ranking.
 
-**Fire kinds**: each ignition rolls what is burning (`fire.kinds`): a
-forest fire (flames), a landfill fire (thick dark smoke, slow growth) or an
-industrial fire (fast growth). The report and the F10 mark name the kind,
-so players can tell from afar what they are heading into.
+**Fire kinds**: each ignition rolls what is burning (`fire.kinds`), with
+forest fires dominating (70%), plus landfill (thick dark smoke, slow) and
+industrial (fast growth). The report and the F10 mark name the kind, so
+players can tell from afar what they are heading into.
+
+A fire POINT can force its kind through its zone name: any `CIVIL Fire
+Point` whose name contains `Building` (or `Forest`, `Landfill`,
+`Industrial`) always ignites as that kind, so you aim structural fires at
+specific buildings. **Building fires never roll randomly** (weight 0):
+they only start on those dedicated points or by GM command (`civil fire
+building 7`). And they play differently: retardant does not work on them
+(C-130 line drops and drums have no effect) and the air attack does not
+smoke-mark them, because neither is used on structures. Helicopter drops
+and the ground brigade do the job.
 
 ## The severity scale (1-10, all events)
 
@@ -300,6 +310,8 @@ the marker is consumed once executed):
 ```
 civil director off        take the wheel: automatic generation pauses
 civil fire 8              severity-8 wildfire right under the marker
+civil fire building 7     structural fire on that building (no retardant,
+                          no air-attack marking: helicopters and trucks)
 civil medevac 9           critical casualty there (~18 min of criticality)
 civil sars 6              castaway on that water position (vessels react)
 civil casevac             battlefield casualty, severity rolled randomly

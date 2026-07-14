@@ -35,8 +35,11 @@ The marker position is the event position. The optional number is the
 severity (1-10); leave it out for a random roll.
 
 ```
-civil fire 8           wildfire under the marker (kind is rolled: forest,
-                       landfill or industrial)
+civil fire 8           wildfire under the marker (kind is rolled: forest
+                       mostly, landfill or industrial)
+civil fire building 7  structural fire on that exact building: retardant
+                       and air-attack marking do NOT work on it, send the
+                       helicopters and the brigade
 civil sarm 5           mountain SAR subject at the marker
 civil sars 6           sea SAR subject (marker must be on open water)
 civil medevac 9        civilian casualty, criticality scales with severity
