@@ -444,6 +444,9 @@ if C.recap.enabled then
   local endHandler = {}
   function endHandler:onEvent(event)
     if event.id ~= world.event.S_EVENT_MISSION_END then return end
+    -- protected like every other handler: an error here must not spill
+    -- into the mission-end sequence
+    local ok, err = pcall(function()
     local rows = topThree()
     local txt = "=== FINAL STANDINGS ===\n"
     for i, r in ipairs(rows) do
@@ -452,6 +455,8 @@ if C.recap.enabled then
       if i >= 10 then break end
     end
     if #rows > 0 then CIV.msgAll(txt, 30) end
+    end)
+    if not ok then CIV.log("Final standings error: " .. tostring(err)) end
   end
   world.addEventHandler(endHandler)
 end

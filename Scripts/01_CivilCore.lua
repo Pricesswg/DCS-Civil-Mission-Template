@@ -952,6 +952,8 @@ end
 
 function CIV.rollSeverity(range)
   range = range or { min = 1, max = 10 }
+  -- defensive: a misconfigured range (max < min) must not crash the roll
+  if range.max < range.min then return range.min end
   return math.random(range.min, range.max)
 end
 
@@ -970,6 +972,8 @@ end
 function CIV.weightedPick(list)
   local total = 0
   for _, entry in ipairs(list) do total = total + entry.weight end
+  -- defensive: all-zero weights must not crash math.random(0)
+  if total <= 0 then return list[1] end
   local r, acc = math.random(total), 0
   for _, entry in ipairs(list) do
     acc = acc + entry.weight

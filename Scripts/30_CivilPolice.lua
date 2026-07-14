@@ -604,7 +604,7 @@ CIV.schedule(function(_, t)
           or CIV.bearingDeg(p, { x = run.endP.x, z = run.endP.z })
         local ap = CIV.offsetPoint(p, hdg, CC.ambush.aheadM)
         ap = CIV.offsetPoint(ap, hdg + (math.random(2) == 1 and 90 or -90),
-          math.random(10, CC.ambush.lateralM))
+          math.random(10, math.max(10, CC.ambush.lateralM)))
         local agname = CIV.spawnFromTemplate(C.templates.ambush, ap)
         if agname then
           run.ambush = { gname = agname, point = ap, spotted = false, hinted = {} }
