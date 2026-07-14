@@ -311,7 +311,20 @@ CIV.Config = {
       -- GM command. Structural firefighting is precision work: helicopter
       -- drops and the ground brigade only, no retardant, no smoke marking.
       { name = "building fire",   weight = 0,  smokeOnly = false, growMult = 0.8, match = "building",
-        airAttack = false, retardant = false, compact = true },
+        airAttack = false, retardant = false, compact = true, structural = true },
+    },
+
+    -- STRUCTURAL fires are not an air firefighting task: the brigade
+    -- pumpers put the flames out on their own (their suppression is
+    -- multiplied by brigadeMult on these fires), while the AIR job is the
+    -- CASUALTY: a MedEvac spawns next to the burning building, and the
+    -- rescue helicopters carry the injured to the hospital. Firefighting
+    -- helicopters get the callout too, with the warning that water is not
+    -- needed there.
+    structural = {
+      casualtyEvent   = true,  -- spawn a MedEvac next to a structural fire
+      casualtyOffsetM = 60,    -- m from the flames (hover room)
+      brigadeMult     = 3.0,   -- brigade suppression multiplier on these fires
     },
 
     -- Fire brigade: when a fire ignites, trucks depart from the nearest
@@ -2245,9 +2258,10 @@ function Fire.ignite(pt, severityOverride, kindOverride)
   CIV.msgAll(string.upper(kindDef.name) .. " reported at " .. pt.name ..
     " (" .. Fire.severityLabel(fire) .. ")\n" .. CIV.coordText(fire.point) ..
     "\nFire zone highlighted on the F10 map." ..
-    (kindDef.retardant == false
-      and "\nSTRUCTURAL fire: helicopter drops and ground crews only " ..
-          "(retardant and air-attack marking are not used on buildings)."
+    (kindDef.structural
+      and ("\nATTENTION firefighting crews: the brigade pumpers handle " ..
+           "the flames. Water is NOT needed. People are injured inside: " ..
+           "the air task is the CASUALTY going out next to the building.")
       or ""), 20)
   CIV.log("Fire #" .. fire.id .. " (" .. kindDef.name .. ") ignited at " ..
     pt.name .. " severity " .. fire.severity)
@@ -2258,6 +2272,18 @@ function Fire.ignite(pt, severityOverride, kindOverride)
       CIV.severityMult(fire.severity), "firewatch early detection")
   end
   dispatchFireTrucks(fire)
+  -- STRUCTURAL fires open a casualty rescue next to the building: the air
+  -- task is the MedEvac, the brigade owns the flames. Guarded: without
+  -- the rescue module the fire simply burns until the trucks finish it.
+  if kindDef.structural and CF.structural.casualtyEvent and CIV.Rescue then
+    local cp = CIV.offsetPoint(fire.point, math.random(0, 359),
+      CF.structural.casualtyOffsetM)
+    local ok, evt = pcall(CIV.Rescue.startEvent, "MEDEVAC",
+      { point = cp, severity = math.ceil(fire.severity) })
+    if ok and evt then
+      CIV.log("Fire #" .. fire.id .. ": structural casualty MedEvac opened")
+    end
+  end
   return fire
 end
 
@@ -2442,8 +2468,13 @@ CIV.schedule(function(_, t)
             b.lastPos = { x = p.x, y = p.y, z = p.z }
           end
         else
-          -- 10 s tick: suppressPerMin / 6 severity per tick
-          fire.severity = fire.severity - CF.trucks.suppressPerMin / 6
+          -- 10 s tick: suppressPerMin / 6 severity per tick. On structural
+          -- fires the pumpers do the whole job themselves, boosted rate.
+          local rate = CF.trucks.suppressPerMin / 6
+          if fire.kindDef.structural then
+            rate = rate * CF.structural.brigadeMult
+          end
+          fire.severity = fire.severity - rate
           if fire.severity <= 0 then
             extinguish(fire, "the fire brigade")
           else

@@ -301,7 +301,20 @@ CIV.Config = {
       -- GM command. Structural firefighting is precision work: helicopter
       -- drops and the ground brigade only, no retardant, no smoke marking.
       { name = "building fire",   weight = 0,  smokeOnly = false, growMult = 0.8, match = "building",
-        airAttack = false, retardant = false, compact = true },
+        airAttack = false, retardant = false, compact = true, structural = true },
+    },
+
+    -- STRUCTURAL fires are not an air firefighting task: the brigade
+    -- pumpers put the flames out on their own (their suppression is
+    -- multiplied by brigadeMult on these fires), while the AIR job is the
+    -- CASUALTY: a MedEvac spawns next to the burning building, and the
+    -- rescue helicopters carry the injured to the hospital. Firefighting
+    -- helicopters get the callout too, with the warning that water is not
+    -- needed there.
+    structural = {
+      casualtyEvent   = true,  -- spawn a MedEvac next to a structural fire
+      casualtyOffsetM = 60,    -- m from the flames (hover room)
+      brigadeMult     = 3.0,   -- brigade suppression multiplier on these fires
     },
 
     -- Fire brigade: when a fire ignites, trucks depart from the nearest

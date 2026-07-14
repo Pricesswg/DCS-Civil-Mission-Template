@@ -287,10 +287,14 @@ Point` whose name contains `Building` (or `Forest`, `Landfill`,
 `Industrial`) always ignites as that kind, so you aim structural fires at
 specific buildings. **Building fires never roll randomly** (weight 0):
 they only start on those dedicated points or by GM command (`civil fire
-building 7`). And they play differently: retardant does not work on them
-(C-130 line drops and drums have no effect) and the air attack does not
-smoke-mark them, because neither is used on structures. Helicopter drops
-and the ground brigade do the job.
+building 7`). And they play differently: a building fire is NOT an air
+firefighting task. The brigade pumpers own the flames (their suppression
+is tripled on structural fires, `fire.structural.brigadeMult`), retardant
+has no effect and the air attack does not smoke-mark them. The AIR task
+is the CASUALTY: a MedEvac opens automatically next to the burning
+building (`fire.structural`), and the rescue helicopters carry the
+injured to the hospital. The callout warns the firefighting crews
+explicitly: water is not needed there.
 
 ## The severity scale (1-10, all events)
 
@@ -320,8 +324,9 @@ the marker is consumed once executed):
 ```
 civil director off        take the wheel: automatic generation pauses
 civil fire 8              severity-8 wildfire right under the marker
-civil fire building 7     structural fire on that building (no retardant,
-                          no air-attack marking: helicopters and trucks)
+civil fire building 7     structural fire on that building: the brigade
+                          fights it, a MedEvac opens next to it for the
+                          rescue helicopters
 civil medevac 9           critical casualty there (~18 min of criticality)
 civil sars 6              castaway on that water position (vessels react)
 civil casevac             battlefield casualty, severity rolled randomly

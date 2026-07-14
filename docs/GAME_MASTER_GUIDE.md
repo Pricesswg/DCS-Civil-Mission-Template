@@ -37,9 +37,10 @@ severity (1-10); leave it out for a random roll.
 ```
 civil fire 8           wildfire under the marker (kind is rolled: forest
                        mostly, landfill or industrial)
-civil fire building 7  structural fire on that exact building: retardant
-                       and air-attack marking do NOT work on it, send the
-                       helicopters and the brigade
+civil fire building 7  structural fire on that exact building: the
+                       brigade extinguishes it on its own and a MedEvac
+                       opens next to it (the air task is the casualty,
+                       not the water)
 civil sarm 5           mountain SAR subject at the marker
 civil sars 6           sea SAR subject (marker must be on open water)
 civil medevac 9        civilian casualty, criticality scales with severity

@@ -27,9 +27,11 @@ drops it in a line run at 150-250 m AGL, or airdrops retardant drums.
 Forest fires burn bright, start small and SPREAD across the zone; a
 landfill fire is a thick dark column that burns hard from the start but
 stays put; an industrial fire is the same, fast and contained; a BUILDING
-fire is precision work: retardant and air-attack marking do not work
-there, it is helicopter drops and ground crews only. The report tells you
-which one you are facing, and the smoke shape confirms it from afar.
+fire is NOT your water run: the brigade pumpers put it out themselves,
+and a MedEvac opens next to the building. Injured people need a
+helicopter ride to the hospital, that is the air job there. The report
+tells you which one you are facing, and the smoke shape confirms it from
+afar.
 Read the smoke: a fresh column is small and towers in about 20 minutes
 if nobody works it, and every good hit visibly knocks it back a size.
 
