@@ -24,6 +24,7 @@
 --   civil recon [sev]         corridor anomaly at the marker
 --   civil vip [sev]           VIP shuttle from the pad nearest the marker
 --   civil transfer [sev]      medical transfer from the pad nearest the marker
+--   civil tour [sev]          sightseeing tour from the pad nearest the marker
 --   civil inspect [sev]       coast guard inspection on the merchant
 --                             nearest the marker
 --   civil ship                spawn a merchant on the sea lanes
@@ -167,6 +168,12 @@ local function cancelNearest(point)
         function() CIV.MedTransfer.cancel(job) end)
     end
   end
+  if CIV.Tour then
+    for _, job in pairs(CIV.Tour._jobs) do
+      consider(job.from.point, "sightseeing tour from " .. job.from.name,
+        function() CIV.Tour.cancel(job) end)
+    end
+  end
   if CIV.Convoy then
     for _, run in pairs(CIV.Convoy._runs) do
       local g = Group.getByName(run.gname)
@@ -272,6 +279,13 @@ commands.convoy = function(args, _)
   if not CIV.Convoy.start({ severity = toSeverity(args[1]) }) then
     say("convoy command failed (needs CIVIL Convoy Start and End zones, " ..
       "or the cap is reached).")
+  end
+end
+
+commands.tour = function(args, point)
+  if not CIV.Tour then moduleMissing("aviation") return end
+  if not CIV.Tour.start({ point = point, severity = toSeverity(args[1]) }) then
+    say("tour command failed (needs CIVIL VIP Pad and CIVIL Tourist Site zones).")
   end
 end
 
@@ -383,7 +397,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|inspect [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|inspect [severity]\n" ..
     CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..

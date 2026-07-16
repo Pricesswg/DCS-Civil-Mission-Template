@@ -192,8 +192,14 @@ function VP.start(opts)
   if not dest then return nil end
 
   VP._vid = VP._vid + 1
+  local legKm = CIV.dist2D(from.point, dest.point) / 1000
   local job = {
     id = VP._vid, from = from, to = dest,
+    legKm = legKm,
+    -- LEG RULE: long legs are fixed-wing only (a helicopter cannot take
+    -- a passenger from another landmass in a sane time)
+    fixedWingOnly = legKm > CV.fixedWingBeyondKm,
+    typeWarned = {},
     severity = (opts and opts.severity)
       and math.max(1, math.min(10, opts.severity))
       or CIV.rollSeverity(CV.severity),
@@ -207,7 +213,9 @@ function VP.start(opts)
   VP._jobs[job.id] = job
   CIV.msgAll("VIP SHUTTLE (severity " .. job.severity .. "/10): passenger " ..
     "waiting at " .. from.name .. " for transport to " .. dest.name ..
-    ".\n" .. CIV.coordText(from.point) ..
+    " (leg " .. math.floor(legKm + 0.5) .. " km" ..
+    (job.fixedWingOnly and ", FIXED-WING only" or "") .. ")." ..
+    "\n" .. CIV.coordText(from.point) ..
     "\nLand on the pad and hold for " .. CV.boardSeconds ..
     " seconds. Smooth flying pays: the passenger scores the ride.", 25)
   return job
@@ -247,6 +255,16 @@ CIV.schedule(function(_, t)
              and info.category ~= Unit.Category.AIRPLANE then return end
           if job.state ~= "waiting" then return end
           if landedOnPad(u, job.from) then
+            -- long legs refuse helicopters (leg rule)
+            if job.fixedWingOnly and info.category ~= Unit.Category.AIRPLANE then
+              if not job.typeWarned[info.unitName] then
+                job.typeWarned[info.unitName] = true
+                CIV.msgUnit(u, "This leg is " .. math.floor(job.legKm + 0.5) ..
+                  " km: too long for a helicopter, the passenger waits for " ..
+                  "a fixed-wing.", 12)
+              end
+              return
+            end
             job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
             if job.boardTimer[info.unitName] >= CV.boardSeconds then
               job.state = "flying"
@@ -357,8 +375,12 @@ function MT.start(opts)
   local sev = opts.severity
     and math.max(1, math.min(10, opts.severity))
     or CIV.rollSeverity({ min = CT.minSeverity, max = 10 })
+  local legKm = CIV.dist2D(from.point, dest.point) / 1000
   local job = {
     id = MT._tid, from = from, to = dest, severity = sev,
+    legKm = legKm,
+    fixedWingOnly = legKm > CT.fixedWingBeyondKm,   -- leg rule, see vip
+    typeWarned = {},
     scoreBonus = opts.scoreBonus or 1,   -- task-board priority bonus
     deadline = timer.getTime()
       + CIV.sevLerp(sev, CT.deadline.atMin, CT.deadline.atMax),
@@ -372,7 +394,9 @@ function MT.start(opts)
   MT._jobs[job.id] = job
   CIV.msgAll("MEDICAL TRANSFER (severity " .. sev .. "/10): a patient at " ..
     from.name .. " must reach the regional hospital at " .. dest.name ..
-    ".\n" .. CIV.coordText(from.point) ..
+    " (leg " .. math.floor(legKm + 0.5) .. " km" ..
+    (job.fixedWingOnly and ", FIXED-WING only" or "") .. ")." ..
+    "\n" .. CIV.coordText(from.point) ..
     "\nCriticality: " .. math.floor(job.deadlineTotal / 60) .. " minutes. " ..
     "Land and hold " .. CT.boardSeconds .. " seconds to board. Fly fast " ..
     "AND smooth: this passenger is on a stretcher.", 25)
@@ -421,6 +445,15 @@ CIV.schedule(function(_, t)
              and info.category ~= Unit.Category.AIRPLANE then return end
           if job.state ~= "waiting" then return end
           if landedOnPad(u, job.from) then
+            if job.fixedWingOnly and info.category ~= Unit.Category.AIRPLANE then
+              if not job.typeWarned[info.unitName] then
+                job.typeWarned[info.unitName] = true
+                CIV.msgUnit(u, "This leg is " .. math.floor(job.legKm + 0.5) ..
+                  " km: too long for a helicopter, the patient needs a " ..
+                  "fixed-wing air ambulance.", 12)
+              end
+              return
+            end
             job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
             if job.boardTimer[info.unitName] >= CT.boardSeconds then
               job.state = "flying"
@@ -476,6 +509,219 @@ CIV.schedule(function(_, t)
             CIV.msgAll("MEDICAL TRANSFER: patient handed over at " ..
               job.to.name .. " in time.", 15)
             closeTransfer(job)
+          end
+        else
+          job.dropTimer = nil
+        end
+      end
+    end
+  end
+  return t + 2
+end, nil, 15)
+
+----------------------------------------------------------------------
+-- SIGHTSEEING TOUR
+-- Tourists board at a VIP pad and want to SEE the island: fly them over
+-- the tour's CIVIL Tourist Site zones (hold inside each zone, in the
+-- altitude band, for orbit.seconds each) and bring them BACK to the same
+-- pad. Ride comfort is the score quality; the leg rule applies (far
+-- sites make the tour fixed-wing only).
+----------------------------------------------------------------------
+
+CIV.Tour = { _jobs = {}, _uid = 0 }
+local TR = CIV.Tour
+local CTR = C.tour
+
+-- opts (command center): { point = vec3 (pickup snaps to nearest pad),
+--                          severity = 1..10 }
+function TR.start(opts)
+  local n = 0
+  for _ in pairs(TR._jobs) do n = n + 1 end
+  if not (opts and opts.point) and n >= CTR.maxActive then return nil end
+  local pads = padCandidates()
+  if #pads == 0 then return nil end
+  local sites = CIV.Zones.byPrefix(C.zones.touristSites)
+  if #sites == 0 then return nil end
+
+  local from
+  if opts and opts.point then
+    local bestDist = 1e12
+    for _, pad in ipairs(pads) do
+      local d = CIV.dist2D(pad.point, opts.point)
+      if d < bestDist then from, bestDist = pad, d end
+    end
+  else
+    from = pads[math.random(#pads)]
+  end
+
+  -- pick 2-3 distinct sites at random
+  local pool = {}
+  for _, s in ipairs(sites) do pool[#pool + 1] = s end
+  local count = math.min(#pool,
+    math.random(CTR.sites.min, math.max(CTR.sites.min, CTR.sites.max)))
+  local chosen = {}
+  for _ = 1, count do
+    chosen[#chosen + 1] = table.remove(pool, math.random(#pool))
+  end
+
+  -- leg rule: the farthest site decides the aircraft type
+  local maxKm = 0
+  for _, s in ipairs(chosen) do
+    maxKm = math.max(maxKm,
+      CIV.dist2D(from.point, { x = s.center.x, z = s.center.z }) / 1000)
+  end
+
+  TR._uid = TR._uid + 1
+  local job = {
+    id = TR._uid, from = from, sites = chosen, seen = {}, siteTime = {},
+    maxKm = maxKm, fixedWingOnly = maxKm > CTR.fixedWingBeyondKm,
+    typeWarned = {},
+    severity = (opts and opts.severity)
+      and math.max(1, math.min(10, opts.severity))
+      or CIV.rollSeverity(CTR.severity),
+    scoreBonus = (opts and opts.scoreBonus) or 1,
+    expiresAt = timer.getTime() + CTR.pickupTtl,
+    state = "waiting", unitName = nil,
+    penalty = 0, lastVel = nil, lastComplaint = 0,
+    boardTimer = {}, dropTimer = nil,
+    gname = CIV.spawnFromTemplate(C.templates.tourists, from.point)
+      or CIV.spawnFromTemplate(C.templates.vip, from.point),
+  }
+  TR._jobs[job.id] = job
+  local names = {}
+  for _, s in ipairs(chosen) do names[#names + 1] = s.name end
+  CIV.msgAll("SIGHTSEEING TOUR (severity " .. job.severity .. "/10): a " ..
+    "tourist party waits at " .. from.name .. " for a tour of: " ..
+    table.concat(names, ", ") .. " (farthest " .. math.floor(maxKm + 0.5) ..
+    " km" .. (job.fixedWingOnly and ", FIXED-WING only" or "") .. ")." ..
+    "\n" .. CIV.coordText(from.point) ..
+    "\nOrbit each site between " .. CTR.orbit.minAGL .. " and " ..
+    CTR.orbit.maxAGL .. " m AGL for " .. CTR.orbit.seconds ..
+    " seconds, then bring them BACK to " .. from.name ..
+    ". Smooth flying: they are here to enjoy it.", 30)
+  CIV.log("Tour #" .. job.id .. " from " .. from.name .. " over " ..
+    table.concat(names, "/"))
+  return job
+end
+
+local function closeTour(job)
+  TR._jobs[job.id] = nil
+  if job.gname then CIV.despawnGroup(job.gname) end
+end
+
+-- command center: close a tour without any outcome
+function TR.cancel(job)
+  if not TR._jobs[job.id] then return false end
+  closeTour(job)
+  return true
+end
+
+local function tourSeenCount(job)
+  local n = 0
+  for _ in pairs(job.seen) do n = n + 1 end
+  return n
+end
+
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, job in pairs(TR._jobs) do
+    if job.state == "waiting" then
+      if now > job.expiresAt then
+        CIV.msgAll("SIGHTSEEING TOUR: the tourists at " .. job.from.name ..
+          " gave up waiting. Task expired.", 12)
+        closeTour(job)
+      else
+        CIV.forEachPlayer(function(u, info)
+          if info.category ~= Unit.Category.HELICOPTER
+             and info.category ~= Unit.Category.AIRPLANE then return end
+          if job.state ~= "waiting" then return end
+          if landedOnPad(u, job.from) then
+            if job.fixedWingOnly and info.category ~= Unit.Category.AIRPLANE then
+              if not job.typeWarned[info.unitName] then
+                job.typeWarned[info.unitName] = true
+                CIV.msgUnit(u, "The farthest site is " ..
+                  math.floor(job.maxKm + 0.5) .. " km out: this tour " ..
+                  "needs a fixed-wing.", 12)
+              end
+              return
+            end
+            job.boardTimer[info.unitName] = (job.boardTimer[info.unitName] or 0) + 2
+            if job.boardTimer[info.unitName] >= CTR.boardSeconds then
+              job.state = "flying"
+              job.unitName = info.unitName
+              job.lastVel = u:getVelocity()
+              job.deadline = now + CTR.duration
+              if job.gname then CIV.despawnGroup(job.gname) job.gname = nil end
+              CIV.msgUnit(u, "Tourists aboard, cameras out. Sites: " ..
+                #job.sites .. ". Fly them there, orbit in the altitude " ..
+                "band, and bring them back to " .. job.from.name .. ".", 20)
+            end
+          else
+            job.boardTimer[info.unitName] = nil
+          end
+        end)
+      end
+    elseif job.state == "flying" then
+      local u = Unit.getByName(job.unitName)
+      if not u or not u:isExist() then
+        CIV.msgAll("SIGHTSEEING TOUR: tour aircraft lost.", 12)
+        closeTour(job)
+      elseif now > job.deadline then
+        CIV.msgAll("SIGHTSEEING TOUR: the light is gone, tour over. " ..
+          "The tourists head back disappointed.", 12)
+        closeTour(job)
+      else
+        -- comfort sampling (2 s tick), tourists included
+        local v = u:getVelocity()
+        if job.lastVel then
+          local ax = (v.x - job.lastVel.x) / 2
+          local ay = (v.y - job.lastVel.y) / 2
+          local az = (v.z - job.lastVel.z) / 2
+          if math.sqrt(ax * ax + ay * ay + az * az) > CTR.comfort.accelLimit then
+            job.penalty = job.penalty + CTR.comfort.penaltyPerHit
+            if now - job.lastComplaint > 30 then
+              job.lastComplaint = now
+              CIV.msgUnit(u, "The tourists grip their cameras. Gently.", 8)
+            end
+          end
+        end
+        job.lastVel = v
+        -- site orbits
+        local p = u:getPoint()
+        local agl = CIV.agl(p)
+        if agl >= CTR.orbit.minAGL and agl <= CTR.orbit.maxAGL then
+          for _, site in ipairs(job.sites) do
+            if not job.seen[site.name] and CIV.Zones.contains(site, p) then
+              job.siteTime[site.name] = (job.siteTime[site.name] or 0) + 2
+              if job.siteTime[site.name] >= CTR.orbit.seconds then
+                job.seen[site.name] = true
+                CIV.msgUnit(u, "The tourists got their shots of " ..
+                  site.name .. " (" .. tourSeenCount(job) .. "/" ..
+                  #job.sites .. ").", 12)
+                if tourSeenCount(job) >= #job.sites then
+                  CIV.msgUnit(u, "That was the last site: bring them " ..
+                    "back to " .. job.from.name .. ".", 15)
+                end
+              end
+            end
+          end
+        end
+        -- return leg: land back on the departure pad with all sites seen
+        if tourSeenCount(job) >= #job.sites and landedOnPad(u, job.from) then
+          job.dropTimer = (job.dropTimer or 0) + 2
+          if job.dropTimer >= CTR.boardSeconds then
+            local info = CIV.players[job.unitName]
+            local quality = math.max(0, 1 - job.penalty)
+            if info then
+              CIV.Score.award(info.playerName, "tour", quality, 0.5,
+                CIV.severityMult(job.severity) * (job.scoreBonus or 1),
+                string.format("sightseeing tour (%d sites, comfort %d%%)",
+                  #job.sites, math.floor(quality * 100)))
+            end
+            CIV.msgAll("SIGHTSEEING TOUR: the party is back at " ..
+              job.from.name .. " full of photos (comfort " ..
+              math.floor(quality * 100) .. "%).", 15)
+            closeTour(job)
           end
         else
           job.dropTimer = nil
@@ -697,6 +943,9 @@ local offerKinds = {
   transfer = { label = "Medical transfer", scoreKey = "medTransfer",
                start = function(o) return MT.start({ severity = o.severity,
                  scoreBonus = o.bonus }) end },
+  tour     = { label = "Sightseeing tour", scoreKey = "tour",
+               start = function(o) return TR.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
 }
 
 local function offerCount()
@@ -826,6 +1075,11 @@ CIV.Menu_register(function(gid, uname)
         job.to.name, job.state,
         math.max(0, math.floor((job.deadline - timer.getTime()) / 60)))
     end
+    for _, job in pairs(TR._jobs) do
+      n = n + 1
+      txt = txt .. string.format("- Sightseeing tour from %s (%s, %d/%d sites)\n",
+        job.from.name, job.state, tourSeenCount(job), #job.sites)
+    end
     CIV.msgGroupId(gid, n > 0 and txt or "No active aviation tasks.", 20)
   end)
 end)
@@ -838,5 +1092,7 @@ CIV.EventStarters.vip = { label = "VIP shuttle (board offer)",
   fn = function() return TB.post("vip") end }
 CIV.EventStarters.transfer = { label = "Medical transfer (board offer)",
   fn = function() return TB.post("transfer") end }
+CIV.EventStarters.tour = { label = "Sightseeing tour (board offer)",
+  fn = function() return TB.post("tour") end }
 
 CIV.log("CivilAviation loaded")

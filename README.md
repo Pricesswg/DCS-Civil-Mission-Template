@@ -98,6 +98,7 @@ rescue reports name the specific region.
 | `CIVIL Convoy Start ...` | Police | 1+ | prisoner convoy departure (police station, courthouse); route runs "On Road" to the destination |
 | `CIVIL Convoy End ...` | Police | 1+ | prisoner convoy destination (prison, courthouse) |
 | `CIVIL Fire LZ ...` | Firefighting | 0+ | hand-picked casualty LZ next to a `CIVIL Fire Point Building` zone (within 500 m); marked with green smoke on the event |
+| `CIVIL Tourist Site ...` | Aviation | 0+ | sightseeing spots (a landmark, a bay, ruins): tours orbit 2-3 of them per run |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -183,6 +184,24 @@ within `media.actionRadius` (a helicopter dropping water, the C-130 on
 its line run), your footage accumulates a bonus worth up to
 +`media.actionBonus` (default +50%) on the story. The TV helicopter
 earns the most by staying with the response, not by circling ruins.
+
+**Leg rule (helicopter vs airplane)**: every pad-to-pad job (VIP shuttle,
+medical transfer, sightseeing tour) computes its leg at start. Legs up to
+`fixedWingBeyondKm` (default 60 km) take a helicopter or an airplane;
+beyond that the job is **FIXED-WING only**: the announcement says so and
+boarding politely refuses helicopters. A patient picked up across the
+island is helicopter work; the same patient bound for a hospital on
+another landmass needs the airplane. Thresholds are per-task
+(`vip.fixedWingBeyondKm`, `medTransfer.fixedWingBeyondKm`,
+`tour.fixedWingBeyondKm`).
+
+**Sightseeing tour**: mark your landmarks with `CIVIL Tourist Site` zones
+and the tour operator opens. A tourist party boards at a VIP pad (offers
+go through the task board like the other aviation jobs), wants to see 2-3
+sites, and comes BACK to the same pad. Each site counts once the aircraft
+holds inside its zone between 100 and 1500 m AGL for 75 seconds; comfort
+is the score quality, because they are here to enjoy it. `civil tour 6`
+starts one from the pad nearest the marker.
 
 **Medical transfer (air ambulance)**: an event CHAIN on the rescue module.
 When a severity 7+ patient reaches a hospital, there is a chance
@@ -340,6 +359,7 @@ civil chase 9             fast two-car convoy from the nearest crossroad
 civil convoy 7            prisoner transport run (Convoy Start -> End zones)
 civil cargo heavy 9       urgent HEAVY load there (expires in ~45 min)
 civil transfer 8          medical transfer from the pad nearest the marker
+civil tour 6              sightseeing tour from the pad nearest the marker
 civil inspect 7           coast guard inspection on the merchant nearest
                           the marker
 civil ship                extra merchant on the sea lanes

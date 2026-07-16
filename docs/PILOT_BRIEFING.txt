@@ -106,6 +106,13 @@ deadline and the passenger is on a stretcher: fly fast AND smooth. The
 long leg and the apron pads make this the air ambulance job for the
 fixed-wing.
 
+SIGHTSEEING TOUR. A tourist party boards at a pad and wants to see 2-3
+sites, then come back to the SAME pad. Hold inside each site zone between
+100 and 1500 m for about a minute, keep it smooth (comfort is the score),
+and mind the callout: long tours are fixed-wing only. The same distance
+rule applies to VIP and medical transfer legs: past 60 km the passenger
+waits for an airplane.
+
 SKYDIVE. Over a drop zone, above 800 m AGL, release the jumpers via
 F10 -> Aviation tasks. They drift with the real wind in freefall and under
 canopy: your score is how close they land to the center, so read the wind

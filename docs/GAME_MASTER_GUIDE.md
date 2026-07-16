@@ -57,6 +57,8 @@ civil convoy 7         prisoner transport from a Convoy Start zone to a
 civil transfer 8       medical transfer (air ambulance): patient from the
                        pad nearest to the marker to a distant pad, with a
                        criticality clock
+civil tour 6           sightseeing tour from the pad nearest the marker
+                       (needs CIVIL Tourist Site zones)
 civil inspect 7        coast guard inspection on the merchant nearest to
                        the marker (needs merchant traffic at sea)
 civil ship             extra merchant ship on the sea lanes

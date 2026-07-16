@@ -76,6 +76,7 @@ CIV.Config = {
     convoyStart       = "CIVIL Convoy Start",         -- prisoner convoy departure zones
     convoyEnd         = "CIVIL Convoy End",           -- prisoner convoy destination zones
     fireLZ            = "CIVIL Fire LZ",              -- optional casualty LZ next to a structural fire point
+    touristSites      = "CIVIL Tourist Site",         -- sightseeing tour orbit spots
   },
 
   ------------------------------------------------------------------
@@ -96,6 +97,7 @@ CIV.Config = {
     skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
     merchant = "CIVIL Merchant",   -- ship group: sea traffic freighter
     airliner = "CIVIL Airliner",   -- plane group: ambient air traffic (type/livery source)
+    tourists = "CIVIL Tourists",   -- ground group: tourist party waiting at the pad (optional visual)
     convoy   = "CIVIL Convoy",     -- vehicle group: police car, school bus, tail car (in that order)
     ambush   = "CIVIL Ambush",     -- vehicle group: two armed men and a car; build it under a
                                    -- HOSTILE country if you want the gunmen to actually shoot
@@ -173,6 +175,7 @@ CIV.Config = {
       convoy      = 18,     -- prisoner convoy escorted to destination, quality = coverage
       convoySpot  = 8,      -- ambush reported before the convoy reached it
       convoyMalus = -10,    -- NEGATIVE: convoy lost to an unreported ambush on your watch
+      tour        = 12,     -- sightseeing tour completed, quality = ride comfort
     },
     tierMult  = { LIGHT = 1.0, MEDIUM = 1.5, HEAVY = 2.2, HEAVY_LIFT = 3.0 },
     -- Severity score multiplier: mult = base + perPoint * severity.
@@ -614,6 +617,7 @@ CIV.Config = {
       vip         = 20,
       inspection  = 20,
       convoy      = 15,
+      tour        = 15,
       -- fires have their own dedicated scheduler (fire.autoIgnite);
       -- sea/air ambient traffic have their own spawn schedulers too
     },
@@ -650,6 +654,10 @@ CIV.Config = {
     padRadius    = 60,     -- m from the pad point
     boardSeconds = 20,     -- s landed and still to board / drop off
     pickupTtl    = 2700,   -- s before the passenger gives up waiting
+    -- LEG RULE: legs longer than this are FIXED-WING only. A short hop
+    -- across the island suits a helicopter; a leg from another landmass
+    -- needs an airplane, and boarding refuses helicopters on those jobs.
+    fixedWingBeyondKm = 60,
     comfort = {
       accelLimit    = 3.0,   -- m/s^2 spike threshold (gravity excluded)
       penaltyPerHit = 0.05,  -- quality lost per sampled spike
@@ -669,11 +677,36 @@ CIV.Config = {
     chance       = 40,      -- % that a qualifying delivery spawns the transfer leg
     minSeverity  = 7,       -- only patients this bad need the regional hospital
     minLeg       = 15000,   -- m, destination pad at least this far from pickup
+    fixedWingBeyondKm = 60, -- legs longer than this are FIXED-WING only (see vip)
     boardSeconds = 20,
     pickupTtl    = 1800,    -- s before the transfer is reassigned (task expires)
     deadline     = { atMin = 2400, atMax = 1200 },  -- s criticality clock, severity-scaled
     comfort = {
       accelLimit    = 2.5,  -- the patient tolerates less than a VIP
+      penaltyPerHit = 0.05,
+    },
+  },
+
+  -- Sightseeing tour: tourists board at a VIP pad and want to SEE the
+  -- island. Fly them over 2-3 CIVIL Tourist Site zones (hold inside each
+  -- zone, in the altitude band, for orbit.seconds) and bring them BACK to
+  -- the same pad. Comfort is the score quality, tourists included. Legs
+  -- beyond fixedWingBeyondKm make the tour fixed-wing only.
+  tour = {
+    maxActive    = 2,
+    severity     = { min = 1, max = 10 },
+    sites        = { min = 2, max = 3 },   -- tourist sites per tour
+    boardSeconds = 20,
+    pickupTtl    = 2700,    -- s before the group gives up waiting
+    duration     = 3600,    -- s to fly the whole tour once boarded
+    orbit = {
+      seconds = 75,         -- s inside each site zone to call it "seen"
+      minAGL  = 100,        -- m, lower is unsafe
+      maxAGL  = 1500,       -- m, higher and the tourists see nothing
+    },
+    fixedWingBeyondKm = 60, -- farthest site beyond this = fixed-wing only
+    comfort = {
+      accelLimit    = 3.0,
       penaltyPerHit = 0.05,
     },
   },
