@@ -68,7 +68,8 @@ CIV.Config = {
     vesselSpawn       = "CIVIL Vessel Spawn",         -- harbor zones where stock rescue boats are launched
     reconPoints       = "CIVIL Recon Point",          -- inspection corridor waypoints (anomalies spawn on them)
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
-    dropZones         = "CIVIL Drop Zone",            -- skydive drop zones (score = distance from center)
+    dropZones         = "CIVIL Drop Zone",            -- emergency supply drop zones (score = accuracy)
+    mediaBases        = "CIVIL Media Base",           -- media ground crew depots (the van rolls from here)
     seaSpawn          = "CIVIL Sea Spawn",            -- merchant traffic: route start zones (random point inside)
     seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
     seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
@@ -94,7 +95,8 @@ CIV.Config = {
     fireTruck= "CIVIL Fire Truck", -- vehicle group: fire brigade truck
     anomaly  = "CIVIL Anomaly",    -- ground group: recon corridor anomaly (optional visual)
     vip      = "CIVIL VIP",        -- ground group: waiting passenger (optional visual)
-    skydiver = "CIVIL Skydiver",   -- ground group: landed jumpers (optional visual)
+    supplies = "CIVIL Supplies",   -- ground group: landed supply crates (optional visual)
+    mediaVan = "CIVIL Media Van",  -- vehicle group: media ground crew (needed for the van task)
     merchant = "CIVIL Merchant",   -- ship group: sea traffic freighter
     airliner = "CIVIL Airliner",   -- plane group: ambient air traffic (type/livery source)
     tourists = "CIVIL Tourists",   -- ground group: tourist party waiting at the pad (optional visual)
@@ -109,7 +111,6 @@ CIV.Config = {
     swat       = "Soldier M4",
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
     fireTruck  = "HEMTT TFFT",     -- stock airfield fire truck, TO VALIDATE
-    skydiver   = "Soldier M4",
     merchant   = "HandyWind",      -- stock bulk freighter, TO VALIDATE type name
     airliner   = "Yak-40",         -- stock small airliner (ambient traffic)
     convoyCar  = "LandRover_ah",   -- convoy fallback: lead and tail car, TO VALIDATE
@@ -169,7 +170,7 @@ CIV.Config = {
       medTransfer = 14,     -- long-range air ambulance leg after a hospital delivery
       trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
       firewatch   = 5,      -- fire spotted early by a preventive patrol
-      skydive     = 8,      -- jumpers released over a drop zone, quality = accuracy
+      supplyDrop  = 10,     -- emergency airdrop crate on target, quality = accuracy
       coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
       intercept   = 14,     -- restricted-area violator identified and escorted out
       convoy      = 18,     -- prisoner convoy escorted to destination, quality = coverage
@@ -618,6 +619,7 @@ CIV.Config = {
       inspection  = 20,
       convoy      = 15,
       tour        = 15,
+      supply      = 20,
       -- fires have their own dedicated scheduler (fire.autoIgnite);
       -- sea/air ambient traffic have their own spawn schedulers too
     },
@@ -711,22 +713,29 @@ CIV.Config = {
     },
   },
 
-  -- Skydive drops: the flying club. Climb over a CIVIL Drop Zone, release
-  -- the jumpers via F10 above minAGL, and the landing point is computed
-  -- from the wind (freefall drift + full canopy drift, with a steer
-  -- correction toward the DZ center). Jumpers spawn on the ground where
-  -- they land; the score quality is the distance from the zone center.
-  skydive = {
-    enabled       = true,
-    jumpers       = 4,      -- figures spawned per drop
-    minAGL        = 800,    -- m, minimum release height
-    freefallSpeed = 50,     -- m/s vertical, belly-to-earth
-    openAGL       = 500,    -- m, canopy opening height
-    canopySink    = 5,      -- m/s under canopy
-    freefallDrift = 0.3,    -- fraction of the wind acting during freefall
-    steerM        = 150,    -- m the jumpers steer back toward the DZ center
-    cooldown      = 180,    -- s per aircraft between drops
-    despawnDelay  = 300,    -- s the landed jumpers stay on the ground
+  -- Emergency supply drop: an emergency opens on one CIVIL Drop Zone (a
+  -- village cut off, a field team out of everything) and supplies must
+  -- come from the air. Release via F10 overhead, above minAGL: the crates
+  -- drift with the wind (no steering: cargo chutes do not fly back) and
+  -- the closer to the zone center they land, the more the drop pays. The
+  -- light planes' answer to the C-130's physical airdrop; helicopters can
+  -- kick crates out too.
+  supplyDrop = {
+    enabled        = true,
+    maxActive      = 1,
+    severity       = { min = 1, max = 10 },
+    ttl            = 1500,   -- s the emergency stays open
+    dropsNeeded    = 3,      -- scored drops that resolve the emergency
+    onePerAircraft = true,   -- each aircraft scores once per emergency
+    crates         = 3,      -- cargo statics spawned at the landing point
+    crateType      = "uh1h_cargo",
+    minAGL         = 500,    -- m, minimum release height
+    freefallSpeed  = 60,     -- m/s before the cargo chutes open
+    openAGL        = 400,    -- m, chute opening height
+    canopySink     = 6,      -- m/s under canopy
+    freefallDrift  = 0.3,    -- fraction of the wind acting before opening
+    cooldown       = 120,    -- s per aircraft between releases
+    despawnDelay   = 600,    -- s the landed crates stay on the ground
   },
 
   -- Task board: aviation tasks (recon, VIP, medical transfer) are not
@@ -825,6 +834,19 @@ CIV.Config = {
     -- empty fire pays less than filming the helicopters fighting it.
     actionRadius = 2000,  -- m from the event
     actionBonus  = 0.5,   -- max score bonus (+50% with responders in frame the whole time)
+    -- MEDIA VAN: the TV helicopter can dispatch a ground crew (the CIVIL
+    -- Media Van template) from the nearest CIVIL Media Base zone to an
+    -- active event. Once the van is ON SCENE, stories aired from that
+    -- event pay an extra bonus. Needs the template and at least one base
+    -- zone; without them the command reports what is missing.
+    van = {
+      enabled       = true,
+      bonus         = 0.3,   -- extra score multiplier with the crew on scene
+      speed         = 18,    -- m/s route speed (~65 km/h)
+      onSceneRadius = 300,   -- m from the event = on scene
+      cooldown      = 300,   -- s per player between dispatches
+      despawnDelay  = 300,   -- s the van lingers after the event ends
+    },
   },
 
   ------------------------------------------------------------------

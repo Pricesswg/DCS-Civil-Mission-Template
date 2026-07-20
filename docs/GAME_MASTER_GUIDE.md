@@ -59,6 +59,8 @@ civil transfer 8       medical transfer (air ambulance): patient from the
                        criticality clock
 civil tour 6           sightseeing tour from the pad nearest the marker
                        (needs CIVIL Tourist Site zones)
+civil supply 7         supply-drop emergency on the drop zone nearest to
+                       the marker
 civil inspect 7        coast guard inspection on the merchant nearest to
                        the marker (needs merchant traffic at sea)
 civil ship             extra merchant ship on the sea lanes

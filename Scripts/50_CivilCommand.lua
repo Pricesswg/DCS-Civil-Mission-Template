@@ -25,6 +25,8 @@
 --   civil vip [sev]           VIP shuttle from the pad nearest the marker
 --   civil transfer [sev]      medical transfer from the pad nearest the marker
 --   civil tour [sev]          sightseeing tour from the pad nearest the marker
+--   civil supply [sev]        supply-drop emergency on the drop zone nearest
+--                             the marker
 --   civil inspect [sev]       coast guard inspection on the merchant
 --                             nearest the marker
 --   civil ship                spawn a merchant on the sea lanes
@@ -174,6 +176,13 @@ local function cancelNearest(point)
         function() CIV.Tour.cancel(job) end)
     end
   end
+  if CIV.SupplyDrop then
+    for _, evt in pairs(CIV.SupplyDrop._events) do
+      consider({ x = evt.center.x, z = evt.center.z },
+        "supply drop at " .. evt.zone.name,
+        function() CIV.SupplyDrop.cancel(evt) end)
+    end
+  end
   if CIV.Convoy then
     for _, run in pairs(CIV.Convoy._runs) do
       local g = Group.getByName(run.gname)
@@ -289,6 +298,14 @@ commands.tour = function(args, point)
   end
 end
 
+commands.supply = function(args, point)
+  if not CIV.SupplyDrop then moduleMissing("aviation") return end
+  if not CIV.SupplyDrop.start({ point = point,
+      severity = toSeverity(args[1]) }) then
+    say("supply command failed (needs a free CIVIL Drop Zone).")
+  end
+end
+
 commands.inspect = function(args, point)
   if not CIV.CoastGuard then moduleMissing("sea ops") return end
   if not CIV.CoastGuard.start({ point = point,
@@ -397,7 +414,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|inspect [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|supply|inspect [severity]\n" ..
     CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..

@@ -78,7 +78,8 @@ in any destination zone.
 | `CIVIL Cargo Point ...` | cargo loading points | flat ground |
 | `CIVIL Recon Point ...` | inspection corridor | 5+ zones along a power line or pipeline; anomalies spawn on them |
 | `CIVIL VIP Pad ...` | passenger shuttle + medical transfer pads | at least 2; put them on airfield aprons and both jobs open up to the fixed-wing. Transfer legs pick a destination at least `medTransfer.minLeg` away (default 15 km), so spread the pads out |
-| `CIVIL Drop Zone ...` | skydive drop zones | optional; an open field per zone. The zone RADIUS is the scoring scale (accuracy = distance from center vs radius), 300-500 m works well |
+| `CIVIL Drop Zone ...` | emergency supply drop zones | optional; an open field per zone. The zone RADIUS is the scoring scale (accuracy = distance from center vs radius), 300-500 m works well |
+| `CIVIL Media Base ...` | media crew depots | optional, near the towns; the CIVIL Media Van template rolls from the nearest one to the event (van task needs both) |
 | `CIVIL Tourist Site ...` | sightseeing tour spots | optional; put them ON the landmarks (castle, bay, ruins), radius 1-2 km. Tours pick 2-3 per run; sites farther than `tour.fixedWingBeyondKm` from the pad make the tour fixed-wing only |
 | `CIVIL Sea Spawn ...` | merchant route start | on open water (a harbor mouth, over the horizon...); ships appear at a random point inside, kept apart from each other |
 | `CIVIL Sea Lane ...` | merchant waypoints | 2+ zones tracing the shipping lane; ships walk nearby lanes (`seaOps.traffic.neighborRadius`) like the chase walks crossroads |

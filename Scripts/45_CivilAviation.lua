@@ -23,9 +23,13 @@
 --   hospital far away: pad to pad on the VIP Pad pool, with a criticality
 --   clock and a tighter comfort threshold. The air ambulance job.
 --
---   SKYDIVE: climb over a "CIVIL Drop Zone", release the jumpers via F10.
---   Landing point = wind drift (freefall damped + full canopy) plus a
---   steer correction toward the center; score quality = accuracy.
+--   SUPPLY DROP: an emergency opens on a "CIVIL Drop Zone" and needs
+--   crates from the air. Release via F10 overhead: wind drift decides the
+--   landing point, distance from the center decides the pay.
+--
+--   MEDIA VAN: the TV helicopter dispatches a ground crew (CIVIL Media
+--   Van template) from a CIVIL Media Base to an active event; with the
+--   crew on scene the aired stories pay a bonus.
 ----------------------------------------------------------------------
 
 assert(CIV and CIV.VERSION, "01_CivilCore.lua must be loaded first")
@@ -733,85 +737,186 @@ CIV.schedule(function(_, t)
 end, nil, 15)
 
 ----------------------------------------------------------------------
--- SKYDIVE DROPS (the flying club)
+-- EMERGENCY SUPPLY DROP
+-- An emergency opens on one CIVIL Drop Zone and needs supplies from the
+-- air. Release via F10 overhead above minAGL: the crates drift with the
+-- wind (cargo chutes do not steer), land, and pay by distance from the
+-- zone center. The emergency resolves after dropsNeeded scored drops or
+-- expires on its ttl.
 ----------------------------------------------------------------------
 
-CIV.Skydive = {}
-local SK = CIV.Skydive
-local SKC = C.skydive
-local lastDrop = {}   -- unitName -> time of the last release
+CIV.SupplyDrop = { _events = {}, _sid = 0 }
+local SD = CIV.SupplyDrop
+local SDC = C.supplyDrop
+local lastRelease = {}   -- unitName -> time of the last release
 
-function SK.release(uname)
-  if not SKC.enabled then return end
+-- opts (command center): { point = vec3 (snaps to the nearest drop zone),
+--                          severity = 1..10, scoreBonus }
+function SD.start(opts)
+  if not SDC.enabled then return nil end
+  local n = 0
+  for _ in pairs(SD._events) do n = n + 1 end
+  if not (opts and opts.point) and n >= SDC.maxActive then return nil end
+  local zones = CIV.Zones.byPrefix(C.zones.dropZones)
+  if #zones == 0 then return nil end
+
+  local active = {}
+  for _, evt in pairs(SD._events) do active[evt.zone.name] = true end
+  local zone
+  if opts and opts.point then
+    local bestDist = 1e12
+    for _, z in ipairs(zones) do
+      local d = CIV.dist2D({ x = z.center.x, z = z.center.z }, opts.point)
+      if d < bestDist and not active[z.name] then zone, bestDist = z, d end
+    end
+  else
+    local free = {}
+    for _, z in ipairs(zones) do
+      if not active[z.name] then free[#free + 1] = z end
+    end
+    if #free > 0 then zone = free[math.random(#free)] end
+  end
+  if not zone then return nil end
+
+  SD._sid = SD._sid + 1
+  local evt = {
+    id = SD._sid, zone = zone,
+    center = { x = zone.center.x, z = zone.center.z },
+    severity = (opts and opts.severity)
+      and math.max(1, math.min(10, opts.severity))
+      or CIV.rollSeverity(SDC.severity),
+    scoreBonus = (opts and opts.scoreBonus) or 1,
+    expiresAt = timer.getTime() + SDC.ttl,
+    drops = 0, droppedBy = {},
+  }
+  evt.markId = CIV.drawEventZone(zone,
+    "SUPPLY DROP needed - " .. zone.name, "transport")
+  SD._events[evt.id] = evt
+  CIV.msgAll("EMERGENCY SUPPLY DROP (severity " .. evt.severity .. "/10): " ..
+    zone.name .. " is cut off and needs supplies from the air.\n" ..
+    CIV.coordText({ x = zone.center.x, y = 0, z = zone.center.z }) ..
+    "\nRelease overhead above " .. SDC.minAGL .. " m AGL via F10. The " ..
+    "closer to the center the crates land, the more the drop pays. " ..
+    SDC.dropsNeeded .. " good drops resolve the emergency, " ..
+    math.floor(SDC.ttl / 60) .. " minutes on the clock.", 30)
+  CIV.log("Supply drop #" .. evt.id .. " opened on " .. zone.name)
+  return evt
+end
+
+local function closeSupply(evt, outcome)
+  SD._events[evt.id] = nil
+  CIV.unmark(evt.markId)
+  if outcome then CIV.msgAll(outcome, 15) end
+end
+
+-- command center: close an emergency without any outcome
+function SD.cancel(evt)
+  if not SD._events[evt.id] then return false end
+  closeSupply(evt)
+  return true
+end
+
+function SD.release(uname)
+  if not SDC.enabled then return end
   local u = Unit.getByName(uname)
   if not u or not u:isExist() then return end
   local info = CIV.players[uname]
   if not info then return end
   if not u:inAir() then
-    CIV.msgUnit(u, "The jumpers politely decline to exit on the ground.", 10)
+    CIV.msgUnit(u, "Release refused: you are on the ground.", 10)
     return
   end
   local p = u:getPoint()
-  local dz = CIV.Zones.containing(C.zones.dropZones, p)
-  if not dz then
-    CIV.msgUnit(u, #CIV.Zones.byPrefix(C.zones.dropZones) == 0
-      and ("No '" .. C.zones.dropZones .. "' zone is defined in this mission.")
-      or "You are not over a drop zone.", 10)
+  local evt = nil
+  for _, e in pairs(SD._events) do
+    if CIV.Zones.contains(e.zone, p) then evt = e break end
+  end
+  if not evt then
+    CIV.msgUnit(u, next(SD._events)
+      and "You are not over the emergency drop zone."
+      or "No supply emergency is open right now.", 10)
     return
   end
   local agl = CIV.agl(p)
-  if agl < SKC.minAGL then
-    CIV.msgUnit(u, "Too low for a jump: release above " .. SKC.minAGL ..
-      " m AGL.", 10)
+  if agl < SDC.minAGL then
+    CIV.msgUnit(u, "Too low: release above " .. SDC.minAGL .. " m AGL.", 10)
+    return
+  end
+  if SDC.onePerAircraft and evt.droppedBy[uname] then
+    CIV.msgUnit(u, "You already made your drop on this emergency: leave " ..
+      "room for the others.", 10)
     return
   end
   local now = timer.getTime()
-  if lastDrop[uname] and now - lastDrop[uname] < SKC.cooldown then
-    CIV.msgUnit(u, "The next load of jumpers is still kitting up: " ..
-      math.ceil(SKC.cooldown - (now - lastDrop[uname])) .. " s.", 10)
+  if lastRelease[uname] and now - lastRelease[uname] < SDC.cooldown then
+    CIV.msgUnit(u, "Riggers are still packing the next load: " ..
+      math.ceil(SDC.cooldown - (now - lastRelease[uname])) .. " s.", 10)
     return
   end
-  lastDrop[uname] = now
+  lastRelease[uname] = now
+  evt.droppedBy[uname] = true
 
-  -- wind sampled once at mid-canopy height (zero wind if the API balks)
+  -- wind drift, no steering: cargo chutes fall where the wind says
   local wind = { x = 0, y = 0, z = 0 }
   pcall(function()
     local w = atmosphere.getWind({ x = p.x,
-      y = CIV.groundY(p) + SKC.openAGL / 2, z = p.z })
+      y = CIV.groundY(p) + SDC.openAGL / 2, z = p.z })
     if w and w.x then wind = w end
   end)
-  local ffTime = math.max(0, agl - SKC.openAGL) / SKC.freefallSpeed
-  local canopyTime = math.min(agl, SKC.openAGL) / SKC.canopySink
-  local drift = ffTime * SKC.freefallDrift + canopyTime
+  local ffTime = math.max(0, agl - SDC.openAGL) / SDC.freefallSpeed
+  local chuteTime = math.min(agl, SDC.openAGL) / SDC.canopySink
+  local drift = ffTime * SDC.freefallDrift + chuteTime
   local lp = { x = p.x + wind.x * drift, z = p.z + wind.z * drift }
-
-  -- under canopy the jumpers steer back toward the DZ center
-  local center = { x = dz.center.x, z = dz.center.z }
-  local off = CIV.dist2D(lp, center)
-  if off > 0 then
-    local pull = math.min(SKC.steerM, off)
-    lp.x = lp.x + (center.x - lp.x) / off * pull
-    lp.z = lp.z + (center.z - lp.z) / off * pull
-  end
   lp.y = land.getHeight({ x = lp.x, y = lp.z })
 
-  local playerName, dzName, dzRadius = info.playerName, dz.name, dz.radius or 300
-  CIV.msgUnit(u, SKC.jumpers .. " jumpers away over " .. dzName ..
-    "! Canopies in the air.", 10)
+  local playerName = info.playerName
+  local eid = evt.id
+  CIV.msgUnit(u, "Crates away! Chutes deploying.", 10)
   CIV.schedule(function()
-    local gname = CIV.spawnGround(lp, SKC.jumpers, C.templates.skydiver,
-      C.fallbackTypes.skydiver, "CIVIL_SKYDIVE")
-    local dist = math.floor(CIV.dist2D(lp, center) + 0.5)
-    local quality = math.max(0, 1 - dist / math.max(100, dzRadius))
-    CIV.Score.award(playerName, "skydive", quality, 0.5, 1,
-      string.format("skydive drop (%d m from center)", dist))
-    CIV.msgAll("SKYDIVE: the jumpers released by " .. playerName ..
-      " landed " .. dist .. " m from the center of " .. dzName .. ".", 12)
-    if gname then
-      CIV.schedule(function() CIV.despawnGroup(gname) end, nil, SKC.despawnDelay)
+    local e = SD._events[eid]
+    -- crates land even if the emergency just closed: visual only then
+    local crateNames = {}
+    local gname = CIV.spawnFromTemplate(C.templates.supplies, lp)
+    if not gname then
+      for i = 1, SDC.crates do
+        crateNames[#crateNames + 1] = CIV.spawnCargo(
+          CIV.offsetPoint(lp, math.random(0, 359), 4 + i * 3),
+          SDC.crateType, 500, "CIVIL_SUPPLY")
+      end
     end
-  end, nil, math.max(1, ffTime + canopyTime))
+    CIV.schedule(function()
+      if gname then CIV.despawnGroup(gname) end
+      for _, cn in ipairs(crateNames) do CIV.despawnStatic(cn) end
+    end, nil, SDC.despawnDelay)
+    if not e then return end
+    local dist = math.floor(CIV.dist2D(lp, e.center) + 0.5)
+    local quality = math.max(0, 1 - dist / math.max(100, e.zone.radius or 300))
+    CIV.Score.award(playerName, "supplyDrop", quality, 0.5,
+      CIV.severityMult(e.severity) * (e.scoreBonus or 1),
+      string.format("supply drop (%d m from center)", dist))
+    e.drops = e.drops + 1
+    CIV.msgAll("SUPPLY DROP: crates from " .. playerName .. " landed " ..
+      dist .. " m from the center of " .. e.zone.name .. " (" .. e.drops ..
+      "/" .. SDC.dropsNeeded .. ").", 12)
+    if e.drops >= SDC.dropsNeeded then
+      closeSupply(e, "SUPPLY DROP: " .. e.zone.name ..
+        " is resupplied. Emergency over, well flown everyone.")
+    end
+  end, nil, math.max(1, ffTime + chuteTime))
 end
+
+-- expiry
+CIV.schedule(function(_, t)
+  local now = timer.getTime()
+  for _, evt in pairs(SD._events) do
+    if now > evt.expiresAt then
+      closeSupply(evt, "SUPPLY DROP: the window on " .. evt.zone.name ..
+        " closed with " .. evt.drops .. "/" .. SDC.dropsNeeded ..
+        " drops delivered.")
+    end
+  end
+  return t + 30
+end, nil, 30)
 
 ----------------------------------------------------------------------
 -- MEDIA COVERAGE (passive)
@@ -821,10 +926,92 @@ local CM = C.media
 local filmTime = {}    -- unitName .. "|" .. eventKey -> seconds
 local actionTime = {}  -- unitName .. "|" .. eventKey -> seconds with responders in frame
 local aired = {}       -- eventKey -> true (one story per event)
+local filmableEvents   -- defined below, used by the van dispatch too
+
+-- MEDIA VAN: ground crew dispatched to an event; on scene it boosts the
+-- aired story. One van per event, spawned from the nearest CIVIL Media
+-- Base, driving "On Road" (one Off Road re-kick on stall).
+CIV.MediaVan = { _vans = {} }   -- eventKey -> van record
+local MV = CIV.MediaVan
+local vanCooldown = {}          -- playerName -> last dispatch time
+
+local function vanRoute(van, fromP, action)
+  local g = Group.getByName(van.gname)
+  if not g then return end
+  pcall(function()
+    g:getController():setTask({ id = "Mission", params = { route = { points = {
+      { x = fromP.x, y = fromP.z, type = "Turning Point", action = action,
+        speed = CM.van.speed },
+      { x = van.target.x, y = van.target.z, type = "Turning Point",
+        action = action, speed = CM.van.speed },
+    } } } })
+  end)
+end
+
+function MV.dispatch(uname)
+  if not (CM.enabled and CM.van.enabled) then return end
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local info = CIV.players[uname]
+  if not info then return end
+  local now = timer.getTime()
+  if vanCooldown[info.playerName]
+     and now - vanCooldown[info.playerName] < CM.van.cooldown then
+    CIV.msgUnit(u, "The newsroom is still repositioning the crew: " ..
+      math.ceil(CM.van.cooldown - (now - vanCooldown[info.playerName])) ..
+      " s.", 10)
+    return
+  end
+  local events = filmableEvents()
+  if #events == 0 then
+    CIV.msgUnit(u, "No active event worth a ground crew right now.", 10)
+    return
+  end
+  local p = u:getPoint()
+  local best, bestDist = nil, 1e12
+  for _, evt in ipairs(events) do
+    local d = CIV.dist2D(p, evt.point)
+    if d < bestDist and not MV._vans[evt.key] then best, bestDist = evt, d end
+  end
+  if not best then
+    CIV.msgUnit(u, "Every nearby event already has a crew on it.", 10)
+    return
+  end
+  local base, baseDist = nil, 1e12
+  for _, pt in ipairs(CIV.Pool.load(C.zones.mediaBases)) do
+    local d = CIV.dist2D(pt.point, best.point)
+    if d < baseDist then base, baseDist = pt, d end
+  end
+  if not base then
+    CIV.msgUnit(u, "No '" .. C.zones.mediaBases ..
+      "' zone is defined in this mission.", 10)
+    return
+  end
+  local gname = CIV.spawnFromTemplate(C.templates.mediaVan, base.point)
+  if not gname then
+    CIV.msgUnit(u, "No '" .. C.templates.mediaVan ..
+      "' template is placed in this mission.", 10)
+    return
+  end
+  vanCooldown[info.playerName] = now
+  local van = {
+    gname = gname, key = best.key, label = best.label,
+    target = { x = best.point.x, z = best.point.z },
+    onScene = false, lastPos = nil, stalledSince = nil, rekicked = false,
+  }
+  MV._vans[best.key] = van
+  CIV.schedule(function() vanRoute(van, base.point, "On Road") end, nil, 2)
+  CIV.msgAll("MEDIA: ground crew rolling out of " .. base.name ..
+    " towards the " .. best.label .. " (dispatched by " ..
+    info.playerName .. "). Stories from that event pay +" ..
+    math.floor(CM.van.bonus * 100) .. "% once the crew is on scene.", 15)
+end
 
 -- active events worth filming: { key, point, label }. Every module lookup
 -- is guarded, so leaving intervention files out of the load list is safe.
-local function filmableEvents()
+-- (forward-declared above: the van dispatch runs before this point
+-- lexically)
+filmableEvents = function()
   local list = {}
   if CIV.Fire then
     for _, fire in pairs(CIV.Fire.actives()) do
@@ -862,6 +1049,41 @@ end
 if CM.enabled then
   CIV.schedule(function(_, t)
     local events = filmableEvents()
+    local now = timer.getTime()
+    -- van lifecycle: arrival, stall re-kick, cleanup when the event ends
+    local liveKeys = {}
+    for _, evt in ipairs(events) do liveKeys[evt.key] = true end
+    for key, van in pairs(MV._vans) do
+      local g = Group.getByName(van.gname)
+      local vu = g and g:getUnit(1)
+      if not vu or not vu:isExist() then
+        MV._vans[key] = nil
+      elseif not liveKeys[key] then
+        MV._vans[key] = nil
+        local gname = van.gname
+        CIV.schedule(function() CIV.despawnGroup(gname) end,
+          nil, CM.van.despawnDelay)
+      elseif not van.onScene then
+        local vp = vu:getPoint()
+        if CIV.dist2D(vp, van.target) <= CM.van.onSceneRadius then
+          van.onScene = true
+          CIV.msgAll("MEDIA: ground crew ON SCENE at the " .. van.label ..
+            ". Stories from this event now pay the crew bonus.", 12)
+        else
+          if van.lastPos and CIV.dist2D(vp, van.lastPos) < 5 then
+            van.stalledSince = van.stalledSince or now
+            if now - van.stalledSince > 90 and not van.rekicked then
+              van.rekicked = true
+              vanRoute(van, vp, "Off Road")
+              CIV.dbg("Media van re-kicked Off Road")
+            end
+          else
+            van.stalledSince = nil
+          end
+          van.lastPos = { x = vp.x, y = vp.y, z = vp.z }
+        end
+      end
+    end
     if #events > 0 then
       -- responders on scene, per event: player aircraft close to the
       -- action (the filmer checks against this list, excluding itself)
@@ -900,13 +1122,17 @@ if CM.enabled then
               if filmTime[k] >= CM.filmSeconds then
                 aired[evt.key] = true
                 local frac = math.min(1, (actionTime[k] or 0) / CM.filmSeconds)
+                local van = MV._vans[evt.key]
+                local vanBonus = (van and van.onScene) and CM.van.bonus or 0
                 CIV.Score.award(info.playerName, "media", 0.7, 0.5,
-                  1 + CM.actionBonus * frac,
-                  string.format("live coverage: %s (action footage %d%%)",
-                    evt.label, math.floor(frac * 100)))
+                  1 + CM.actionBonus * frac + vanBonus,
+                  string.format("live coverage: %s (action footage %d%%%s)",
+                    evt.label, math.floor(frac * 100),
+                    vanBonus > 0 and ", crew on scene" or ""))
                 CIV.msgAll("LIVE ON AIR: " .. info.playerName ..
                   " broadcast footage of the " .. evt.label ..
-                  (frac > 0.5 and " with the responders in frame." or "."), 15)
+                  (vanBonus > 0 and " with the ground crew on scene."
+                    or (frac > 0.5 and " with the responders in frame." or ".")), 15)
               end
             end
           end
@@ -945,6 +1171,9 @@ local offerKinds = {
                  scoreBonus = o.bonus }) end },
   tour     = { label = "Sightseeing tour", scoreKey = "tour",
                start = function(o) return TR.start({ severity = o.severity,
+                 scoreBonus = o.bonus }) end },
+  supply   = { label = "Emergency supply drop", scoreKey = "supplyDrop",
+               start = function(o) return SD.start({ severity = o.severity,
                  scoreBonus = o.bonus }) end },
 }
 
@@ -1046,8 +1275,10 @@ CIV.Menu_register(function(gid, uname)
   local sub = missionCommands.addSubMenuForGroup(gid, "Aviation tasks", CIV.rootMenu[gid])
   missionCommands.addCommandForGroup(gid, "Recon: report anomaly overhead",
     sub, reportAnomaly, uname)
-  missionCommands.addCommandForGroup(gid, "Skydive: release jumpers (over a drop zone)",
-    sub, SK.release, uname)
+  missionCommands.addCommandForGroup(gid, "Supply drop: release crates (over the emergency zone)",
+    sub, SD.release, uname)
+  missionCommands.addCommandForGroup(gid, "Media: dispatch ground crew to nearest event",
+    sub, MV.dispatch, uname)
   if CB.enabled then
     local board = missionCommands.addSubMenuForGroup(gid, "Task board", sub)
     missionCommands.addCommandForGroup(gid, "List offers", board, listOffers, gid)
@@ -1080,6 +1311,13 @@ CIV.Menu_register(function(gid, uname)
       txt = txt .. string.format("- Sightseeing tour from %s (%s, %d/%d sites)\n",
         job.from.name, job.state, tourSeenCount(job), #job.sites)
     end
+    for _, evt in pairs(SD._events) do
+      n = n + 1
+      txt = txt .. string.format(
+        "- Supply drop at %s (%d/%d drops, %d min left)\n", evt.zone.name,
+        evt.drops, C.supplyDrop.dropsNeeded,
+        math.max(0, math.floor((evt.expiresAt - timer.getTime()) / 60)))
+    end
     CIV.msgGroupId(gid, n > 0 and txt or "No active aviation tasks.", 20)
   end)
 end)
@@ -1094,5 +1332,7 @@ CIV.EventStarters.transfer = { label = "Medical transfer (board offer)",
   fn = function() return TB.post("transfer") end }
 CIV.EventStarters.tour = { label = "Sightseeing tour (board offer)",
   fn = function() return TB.post("tour") end }
+CIV.EventStarters.supply = { label = "Emergency supply drop (board offer)",
+  fn = function() return TB.post("supply") end }
 
 CIV.log("CivilAviation loaded")

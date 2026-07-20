@@ -21,8 +21,8 @@ Scripts/
                             hospital ships (shared rescue engine)
   30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
   40_CivilTransport.lua     Fixed mass tiers + supply airdrops
-  45_CivilAviation.lua      Recon, VIP shuttle, media, medical transfer,
-                            skydive, aviation task board
+  45_CivilAviation.lua      Recon, VIP shuttle, media + media van, medical
+                            transfer, tours, supply drops, task board
   46_CivilAirTraffic.lua    Ambient AI civil flights + restricted-area intercepts
   47_CivilSeaOps.lua        Merchant traffic on sea lanes + coast guard inspections
   50_CivilCommand.lua       Command center marker commands + session recap
@@ -90,7 +90,8 @@ rescue reports name the specific region.
 | `CIVIL Cargo Destination ...` | Transport | 1+ | delivery zone(s): sling loads and supply airdrops count in any of them |
 | `CIVIL Recon Point ...` | Aviation | 5+ | along a power line or pipeline; anomalies spawn on them, patrol the corridor low |
 | `CIVIL VIP Pad ...` | Aviation | 2+ | passenger shuttle helipads; the medical transfer legs use the same pool (pads on aprons give the job to the fixed-wing) |
-| `CIVIL Drop Zone ...` | Aviation | 0+ | skydive drop zones: release jumpers overhead via F10, score = landing accuracy |
+| `CIVIL Drop Zone ...` | Aviation | 0+ | emergency supply drop zones: release crates overhead via F10, score = landing accuracy |
+| `CIVIL Media Base ...` | Aviation | 0+ | media ground crew depots: the news van rolls from the nearest one to the event |
 | `CIVIL Sea Spawn ...` | Sea ops | 1+ | merchant route START: ships appear at a random point inside (staggered so they never overlap) |
 | `CIVIL Sea Lane ...` | Sea ops | 2+ | route waypoints: ships walk nearby lanes like the police chase walks crossroads |
 | `CIVIL Sea Despawn ...` | Sea ops | 1+ | merchant route END: ships are cleared on arrival |
@@ -131,7 +132,8 @@ used when absent):**
 | `CIVIL Scene Standoff ...` | SWAT objective scene: cordon, cars | none (scene skipped) |
 | `CIVIL Anomaly ...` | recon corridor anomaly visual | none (logical anomaly) |
 | `CIVIL VIP ...` | waiting passenger visual | none (logical passenger) |
-| `CIVIL Skydiver ...` | landed jumpers | `Soldier M4` |
+| `CIVIL Supplies ...` | landed supply crates visual | cargo statics (`supplyDrop.crateType`) |
+| `CIVIL Media Van ...` | media ground crew vehicle | none (no template = no van task) |
 | `CIVIL Merchant ...` | sea traffic freighter | `HandyWind` |
 | `CIVIL Airliner ...` | ambient air traffic (type + livery source) | `Yak-40` |
 | `CIVIL Convoy ...` | prisoner transport: police car, school bus, tail car (in that order) | `LandRover_ah` + `IKARUS Bus` + `LandRover_ah` |
@@ -248,14 +250,25 @@ is armed only when a player airplane is airborne to answer it; if nobody
 intercepts in time, ATC diverts the flight out by itself and the alert
 closes with no points.
 
-**Skydive drops**: mark one or more `CIVIL Drop Zone` zones and the flying
-club is in business. Climb overhead, release the jumpers via F10 above
-800 m AGL, and the landing point is computed from the actual mission wind:
-damped drift in freefall, full drift under canopy, plus a small steer
-correction toward the center. The jumpers spawn where they land and the
-score is their distance from the zone center, so the pilot's job is
-reading the wind and picking the release point. Per-aircraft cooldown
-between drops.
+**Emergency supply drop**: an emergency opens on one `CIVIL Drop Zone` (a
+village cut off, a team out of everything) and needs crates from the air.
+Offers go through the task board; once live, release via F10 overhead
+above 500 m AGL. The landing point is computed from the actual mission
+wind (damped drift before the cargo chutes open, full drift under canopy,
+NO steering: cargo does not fly back), so the pilot's job is reading the
+wind and picking the release point. The closer to the zone center the
+crates land, the more the drop pays; 3 good drops resolve the emergency,
+one scored drop per aircraft. The light planes' answer to the C-130's
+physical airdrop. `civil supply 7` opens one on the zone nearest the
+marker.
+
+**Media van (ground crew)**: build a `CIVIL Media Van` template and mark
+one or more `CIVIL Media Base` zones, and the TV helicopter gets a
+dispatcher role: the F10 command sends the van from the nearest base to
+the nearest active event ("On Road", one re-kick on stall). Once the crew
+is ON SCENE, stories aired from that event pay an extra
++`media.van.bonus` (default +30%), stacking with the action-footage
+bonus. One van per event, per-player dispatch cooldown.
 
 **Light fixed-wing (Bronco, MB-339, L-39, C-101, Yak-52, Christen
 Eagle...)** have a full job list: spotting works from ANY airplane (fire
@@ -360,6 +373,7 @@ civil convoy 7            prisoner transport run (Convoy Start -> End zones)
 civil cargo heavy 9       urgent HEAVY load there (expires in ~45 min)
 civil transfer 8          medical transfer from the pad nearest the marker
 civil tour 6              sightseeing tour from the pad nearest the marker
+civil supply 7            supply-drop emergency on the nearest drop zone
 civil inspect 7           coast guard inspection on the merchant nearest
                           the marker
 civil ship                extra merchant on the sea lanes
