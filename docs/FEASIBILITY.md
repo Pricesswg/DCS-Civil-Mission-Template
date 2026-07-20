@@ -120,6 +120,11 @@ for the cars. The ambush clone keeps the template's own country, so a
 hostile-country template makes the gunmen engage for real; the scripted
 proximity failure covers neutral templates too.
 
+**Supply drop type gate (v0.5)**: the C-130 type match uses substring
+patterns (`supplyDrop.c130Types`, default Hercules/C-130/C130): validate
+them against the official module's real type name in dcs.log at first
+spawn, same caveat as the air-attack type list.
+
 ## Corrections / clarifications vs the concept
 
 - **`world.setPersistenceHandler`**: I found NO evidence this exists as a

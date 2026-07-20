@@ -795,9 +795,10 @@ function SD.start(opts)
   CIV.msgAll("EMERGENCY SUPPLY DROP (severity " .. evt.severity .. "/10): " ..
     zone.name .. " is cut off and needs supplies from the air.\n" ..
     CIV.coordText({ x = zone.center.x, y = 0, z = zone.center.z }) ..
-    "\nRelease overhead above " .. SDC.minAGL .. " m AGL via F10. The " ..
-    "closer to the center the crates land, the more the drop pays. " ..
-    SDC.dropsNeeded .. " good drops resolve the emergency, " ..
+    "\nC-130: one rigged full load from above " .. SDC.c130MinAGL ..
+    " m resolves it alone. Helicopters: kick crates out above " ..
+    SDC.heloMinAGL .. " m, " .. SDC.dropsNeeded .. " good drops close " ..
+    "it. Release via F10 overhead; accuracy pays. " ..
     math.floor(SDC.ttl / 60) .. " minutes on the clock.", 30)
   CIV.log("Supply drop #" .. evt.id .. " opened on " .. zone.name)
   return evt
@@ -816,6 +817,13 @@ function SD.cancel(evt)
   return true
 end
 
+local function isC130(typeName)
+  for _, pattern in ipairs(SDC.c130Types) do
+    if string.find(typeName or "", pattern, 1, true) then return true end
+  end
+  return false
+end
+
 function SD.release(uname)
   if not SDC.enabled then return end
   local u = Unit.getByName(uname)
@@ -824,6 +832,20 @@ function SD.release(uname)
   if not info then return end
   if not u:inAir() then
     CIV.msgUnit(u, "Release refused: you are on the ground.", 10)
+    return
+  end
+  -- who flies it: the C-130 alone among the airplanes (rigged pallets),
+  -- helicopters kick crates out low, light planes are not equipped
+  local c130 = false
+  if info.category == Unit.Category.AIRPLANE then
+    if isC130(info.typeName) then
+      c130 = true
+    else
+      CIV.msgUnit(u, "Supply pallets need a rigged cargo aircraft: this " ..
+        "is C-130 or helicopter work, not a light plane job.", 12)
+      return
+    end
+  elseif info.category ~= Unit.Category.HELICOPTER then
     return
   end
   local p = u:getPoint()
@@ -838,8 +860,9 @@ function SD.release(uname)
     return
   end
   local agl = CIV.agl(p)
-  if agl < SDC.minAGL then
-    CIV.msgUnit(u, "Too low: release above " .. SDC.minAGL .. " m AGL.", 10)
+  local minAGL = c130 and SDC.c130MinAGL or SDC.heloMinAGL
+  if agl < minAGL then
+    CIV.msgUnit(u, "Too low: release above " .. minAGL .. " m AGL.", 10)
     return
   end
   if SDC.onePerAircraft and evt.droppedBy[uname] then
@@ -871,7 +894,8 @@ function SD.release(uname)
 
   local playerName = info.playerName
   local eid = evt.id
-  CIV.msgUnit(u, "Crates away! Chutes deploying.", 10)
+  CIV.msgUnit(u, c130 and "Full load away! Pallet train under chutes."
+    or "Crates away! Chutes deploying.", 10)
   CIV.schedule(function()
     local e = SD._events[eid]
     -- crates land even if the emergency just closed: visual only then
@@ -892,15 +916,19 @@ function SD.release(uname)
     local dist = math.floor(CIV.dist2D(lp, e.center) + 0.5)
     local quality = math.max(0, 1 - dist / math.max(100, e.zone.radius or 300))
     CIV.Score.award(playerName, "supplyDrop", quality, 0.5,
-      CIV.severityMult(e.severity) * (e.scoreBonus or 1),
-      string.format("supply drop (%d m from center)", dist))
-    e.drops = e.drops + 1
-    CIV.msgAll("SUPPLY DROP: crates from " .. playerName .. " landed " ..
-      dist .. " m from the center of " .. e.zone.name .. " (" .. e.drops ..
-      "/" .. SDC.dropsNeeded .. ").", 12)
+      CIV.severityMult(e.severity) * (e.scoreBonus or 1)
+        * (c130 and SDC.c130LoadMult or 1),
+      string.format(c130 and "C-130 full airdrop (%d m from center)"
+        or "supply drop (%d m from center)", dist))
+    e.drops = e.drops + ((c130 and SDC.c130ResolvesAlone)
+      and SDC.dropsNeeded or 1)
+    CIV.msgAll("SUPPLY DROP: " .. (c130 and "the full C-130 load" or
+      "crates") .. " from " .. playerName .. " landed " .. dist ..
+      " m from the center of " .. e.zone.name .. " (" ..
+      math.min(e.drops, SDC.dropsNeeded) .. "/" .. SDC.dropsNeeded .. ").", 12)
     if e.drops >= SDC.dropsNeeded then
       closeSupply(e, "SUPPLY DROP: " .. e.zone.name ..
-        " is resupplied. Emergency over, well flown everyone.")
+        " is resupplied. Emergency over, well flown.")
     end
   end, nil, math.max(1, ffTime + chuteTime))
 end

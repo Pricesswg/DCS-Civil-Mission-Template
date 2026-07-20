@@ -114,11 +114,11 @@ rule applies to VIP and medical transfer legs: past 60 km the passenger
 waits for an airplane.
 
 SUPPLY DROP. An emergency opens on a drop zone and needs crates from the
-air. Get overhead above 500 m AGL and release via F10 -> Aviation tasks.
-The crates drift with the real wind and cargo chutes do not steer: read
-the wind, release upwind, and the closer to the center they land the more
-you earn. One scored drop per aircraft, three good drops close the
-emergency.
+air. C-130: one rigged full load from above 500 m resolves it alone, and
+it pays accordingly. Helicopters: kick crates out above 100 m, three good
+drops close it, one scored drop each. Light planes are not equipped for
+pallets: sit this one out. The crates drift with the real wind and cargo
+chutes do not steer: read the wind, release upwind, accuracy pays.
 
 MEDIA VAN. From the TV helicopter you can dispatch the ground crew to the
 nearest event via F10: once their van is on scene, your aired stories

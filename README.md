@@ -252,15 +252,16 @@ closes with no points.
 
 **Emergency supply drop**: an emergency opens on one `CIVIL Drop Zone` (a
 village cut off, a team out of everything) and needs crates from the air.
-Offers go through the task board; once live, release via F10 overhead
-above 500 m AGL. The landing point is computed from the actual mission
-wind (damped drift before the cargo chutes open, full drift under canopy,
-NO steering: cargo does not fly back), so the pilot's job is reading the
-wind and picking the release point. The closer to the zone center the
-crates land, the more the drop pays; 3 good drops resolve the emergency,
-one scored drop per aircraft. The light planes' answer to the C-130's
-physical airdrop. `civil supply 7` opens one on the zone nearest the
-marker.
+Who flies it matters: the **C-130** is the only airplane rigged for a
+proper airdrop, and one full load released above 500 m resolves the
+emergency ALONE (scored with `supplyDrop.c130LoadMult`). **Helicopters**
+kick single crates out low (above 100 m): 3 good drops close it, one
+scored drop per aircraft. Light planes are refused, they are not equipped
+for pallets. The landing point is computed from the actual mission wind
+(damped drift before the cargo chutes open, full drift under canopy, NO
+steering: cargo does not fly back), and the closer to the zone center the
+crates land, the more the drop pays. Offers go through the task board;
+`civil supply 7` opens one on the zone nearest the marker.
 
 **Media van (ground crew)**: build a `CIVIL Media Van` template and mark
 one or more `CIVIL Media Base` zones, and the TV helicopter gets a

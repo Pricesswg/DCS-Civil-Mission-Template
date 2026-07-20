@@ -715,21 +715,29 @@ CIV.Config = {
 
   -- Emergency supply drop: an emergency opens on one CIVIL Drop Zone (a
   -- village cut off, a field team out of everything) and supplies must
-  -- come from the air. Release via F10 overhead, above minAGL: the crates
-  -- drift with the wind (no steering: cargo chutes do not fly back) and
-  -- the closer to the zone center they land, the more the drop pays. The
-  -- light planes' answer to the C-130's physical airdrop; helicopters can
-  -- kick crates out too.
+  -- come from the air. Release via F10 overhead: the crates drift with
+  -- the wind (no steering: cargo chutes do not fly back) and the closer
+  -- to the zone center they land, the more the drop pays.
+  --
+  -- WHO FLIES IT: the C-130 is the only airplane rigged for a proper
+  -- airdrop, and one full load from it resolves the emergency ALONE
+  -- (scored with c130LoadMult). Helicopters kick single crates out low:
+  -- dropsNeeded of them close it. Light planes are refused, they are not
+  -- equipped for this.
   supplyDrop = {
     enabled        = true,
     maxActive      = 1,
     severity       = { min = 1, max = 10 },
     ttl            = 1500,   -- s the emergency stays open
-    dropsNeeded    = 3,      -- scored drops that resolve the emergency
+    dropsNeeded    = 3,      -- helicopter drops that resolve the emergency
     onePerAircraft = true,   -- each aircraft scores once per emergency
     crates         = 3,      -- cargo statics spawned at the landing point
     crateType      = "uh1h_cargo",
-    minAGL         = 500,    -- m, minimum release height
+    c130Types      = { "Hercules", "C-130", "C130" },  -- substring match, TO VALIDATE
+    c130ResolvesAlone = true,
+    c130LoadMult   = 2.0,    -- score multiplier for the full C-130 load
+    c130MinAGL     = 500,    -- m, minimum release height for the C-130
+    heloMinAGL     = 100,    -- m, helicopters kick crates out low
     freefallSpeed  = 60,     -- m/s before the cargo chutes open
     openAGL        = 400,    -- m, chute opening height
     canopySink     = 6,      -- m/s under canopy
