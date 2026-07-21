@@ -293,7 +293,10 @@ function R.startEvent(key, opts)
       point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
     }
   else
-    pt = CIV.Pool.pick(def.poolPrefix, 1000)
+    -- bias the spawn to the region a player is in (see Pool.pickNearPlayers)
+    pt = (C.rescue.spawnNearPlayers
+      and CIV.Pool.pickNearPlayers(def.poolPrefix, def.region, 1000))
+      or CIV.Pool.pick(def.poolPrefix, 1000)
     if not pt then
       CIV.dbg("Rescue " .. key .. ": no free point in pool " .. def.poolPrefix)
       return nil
@@ -685,7 +688,9 @@ function R.startSinking(opts)
     pt = { name = "GM sinking " .. sc._gmid, radius = 100,
            point = { x = opts.point.x, y = 0, z = opts.point.z } }
   else
-    pt = CIV.Pool.pick(C.zones.sarSeaPoints, 1000)
+    pt = (C.rescue.spawnNearPlayers
+      and CIV.Pool.pickNearPlayers(C.zones.sarSeaPoints, C.zones.sarSeaRegion, 1000))
+      or CIV.Pool.pick(C.zones.sarSeaPoints, 1000)
     if not pt then return nil end
   end
 

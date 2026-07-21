@@ -77,7 +77,7 @@ rescue reports name the specific region.
 | `CIVIL C130 Reload ...` | Firefighting | 1+ | retardant reload apron, reachable by taxi. **User-built static area**: decorate it yourself (auto-dressing off by default) |
 | `CIVIL SAR Mountain Region ...` | Rescue | 1+ | macro-region(s) for mountain SAR (spotter + vague-direction reference); two separate mountains = two zones |
 | `CIVIL SAR Mountain Point ...` | Rescue | 3+ | survivor spots reachable in a hover |
-| `CIVIL SAR Sea Region ...` | Rescue | 1+ | macro-region(s) for sea SAR |
+| `CIVIL SAR Sea Region ...` | Rescue | 1+ | macro-region(s) for sea SAR. Events spawn inside the region a player is IN (see below), so put a region around each cluster of points |
 | `CIVIL SAR Sea Point ...` | Rescue | 3+ | on OPEN water (a boat, or a sinking wreck + rafts, spawns there) |
 | `CIVIL Vessel Spawn ...` | Rescue | 1+ | rescue-boat harbors, on water. Balance rule: distance to the SAR points / 9 m/s should be slightly LONGER than the hover window (default 25 min ~ 13.5 km) |
 | `CIVIL Medevac Point ...` | Rescue | 3+ | civilian casualty LZs (accidents, unsafe areas) |
@@ -371,6 +371,12 @@ rules keep the map believable:
 - **Fire kind exclusion** (`fire.kinds[*].suppressedBy`): an industrial
   (factory) fire is very unlikely to break out while a wildfire is already
   burning. Scattered forest fires still coexist.
+- **Spawn near players** (`rescue.spawnNearPlayers`, default on): a
+  region-based rescue (SAR mountain/sea, sinking) spawns inside the
+  macro-region that currently has a player, so nobody crosses half the
+  map for a random callout. With nobody inside a region it uses the
+  region nearest a player; with no players or no regions, any point.
+  MedEvac and CASEVAC have no region and are unaffected.
 - **Sea event rarity** (`director.seaTiers`): a single sea roll picks WHICH
   sea event happens, by weight: a coast-guard **inspection** is the everyday
   job, a **sea rescue** is less common, a **sinking ship** with a dozen

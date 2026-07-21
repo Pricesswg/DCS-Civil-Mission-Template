@@ -424,6 +424,13 @@ CIV.Config = {
   -- Rescue (SAR mountain/sea share the engine; medevac adds criticality)
   ------------------------------------------------------------------
   rescue = {
+    -- Spawn region-based events (SAR mountain/sea, sinking) inside the
+    -- macro-region that currently has a player, so nobody has to cross
+    -- half the map for a random callout. Falls back to the region nearest
+    -- a player, then to any point (no players / no regions). MedEvac and
+    -- CASEVAC have no region and are unaffected. See Pool.pickNearPlayers.
+    spawnNearPlayers = true,
+
     sarMountain = {
       maxActive = 2,
       severity  = { min = 1, max = 10 },
@@ -1467,6 +1474,57 @@ function CIV.Pool.near(prefix, point, radius, excludeName)
     end
   end
   return res
+end
+
+-- Pick a free pool point BIASED to where the players actually are, so an
+-- event does not spawn across the map from everyone. With a regionPrefix
+-- (large macro-areas, each holding a cluster of points): prefer a point
+-- inside a region that currently CONTAINS a player; if nobody is inside a
+-- region, fall back to the region NEAREST to a player; with no players at
+-- all, or no region defined, behave like Pool.pick. A GM-commanded point
+-- bypasses this (the caller handles opts.point).
+function CIV.Pool.pickNearPlayers(poolPrefix, regionPrefix, minDist)
+  minDist = minDist or 1000
+  local regions = regionPrefix and CIV.Zones.byPrefix(regionPrefix) or {}
+  if #regions == 0 then return CIV.Pool.pick(poolPrefix, minDist) end
+
+  local pps = {}
+  CIV.forEachPlayer(function(u) pps[#pps + 1] = u:getPoint() end)
+  if #pps == 0 then return CIV.Pool.pick(poolPrefix, minDist) end
+
+  local function regionHasPlayer(region)
+    for _, p in ipairs(pps) do
+      if CIV.Zones.contains(region, p) then return true end
+    end
+    return false
+  end
+
+  local target = {}
+  for _, region in ipairs(regions) do
+    if regionHasPlayer(region) then target[#target + 1] = region end
+  end
+  if #target == 0 then
+    -- nobody is inside a region: use the one nearest to any player
+    local best, bestD = nil, 1e12
+    for _, region in ipairs(regions) do
+      local c = { x = region.center.x, z = region.center.z }
+      for _, p in ipairs(pps) do
+        local d = CIV.dist2D(c, p)
+        if d < bestD then best, bestD = region, d end
+      end
+    end
+    if best then target = { best } end
+  end
+
+  local function insideTarget(pt)
+    for _, region in ipairs(target) do
+      if CIV.Zones.contains(region, pt.point) then return true end
+    end
+    return false
+  end
+  -- last resort keeps events flowing if the chosen region has no free point
+  return CIV.Pool.pick(poolPrefix, minDist, insideTarget)
+    or CIV.Pool.pick(poolPrefix, minDist)
 end
 
 ----------------------------------------------------------------------
@@ -3525,7 +3583,10 @@ function R.startEvent(key, opts)
       point = { x = opts.point.x, y = CIV.groundY(opts.point), z = opts.point.z },
     }
   else
-    pt = CIV.Pool.pick(def.poolPrefix, 1000)
+    -- bias the spawn to the region a player is in (see Pool.pickNearPlayers)
+    pt = (C.rescue.spawnNearPlayers
+      and CIV.Pool.pickNearPlayers(def.poolPrefix, def.region, 1000))
+      or CIV.Pool.pick(def.poolPrefix, 1000)
     if not pt then
       CIV.dbg("Rescue " .. key .. ": no free point in pool " .. def.poolPrefix)
       return nil
@@ -3917,7 +3978,9 @@ function R.startSinking(opts)
     pt = { name = "GM sinking " .. sc._gmid, radius = 100,
            point = { x = opts.point.x, y = 0, z = opts.point.z } }
   else
-    pt = CIV.Pool.pick(C.zones.sarSeaPoints, 1000)
+    pt = (C.rescue.spawnNearPlayers
+      and CIV.Pool.pickNearPlayers(C.zones.sarSeaPoints, C.zones.sarSeaRegion, 1000))
+      or CIV.Pool.pick(C.zones.sarSeaPoints, 1000)
     if not pt then return nil end
   end
 

@@ -71,7 +71,7 @@ in any destination zone.
 | `CIVIL Water Point ...` | helicopter water pickup | on a body of water, with maneuvering room |
 | `CIVIL C130 Reload ...` | C-130 retardant reload apron(s) | reachable on the ground. USER-BUILT static area: decorate it yourself (`autoDress.c130Reload = false` by default) |
 | `CIVIL SAR Mountain Region ...` + `CIVIL SAR Mountain Point ...` | mountain SAR | region(s) can cover separate ranges; points reachable in a hover |
-| `CIVIL SAR Sea Region ...` + `CIVIL SAR Sea Point ...` | sea SAR | points on OPEN water (a boat spawns there) |
+| `CIVIL SAR Sea Region ...` + `CIVIL SAR Sea Point ...` | sea SAR | points on OPEN water (a boat spawns there). The event spawns inside the region a player is currently IN (`rescue.spawnNearPlayers`), so wrap each region around its own cluster of points |
 | `CIVIL Police Point ...` | chase | 30-40 points ON real crossroads, neighbor distance <= 1500 m |
 | `CIVIL SWAT Base ...` | team boarding | apron(s) where the helicopter can land |
 | `CIVIL SWAT Point ...` | SWAT scenarios | rooftops / urban LZs (rooftop spawn TO TEST) |
