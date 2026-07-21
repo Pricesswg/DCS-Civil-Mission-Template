@@ -755,21 +755,29 @@ CIV.schedule(function(_, t)
         evt.recovered .. " survivors recovered, " .. lost .. " lost.", 20)
       closeEvent(sc, evt)
     else
+      -- snapshot the player helicopters in a valid pickup state ONCE per
+      -- tick (position + low + slow), then match rafts against it, instead
+      -- of re-scanning every player for each of the dozen rafts
+      local heloz = {}
+      CIV.forEachPlayerHelo(function(h, info)
+        local hp = h:getPoint()
+        if CIV.agl(hp) <= scfg.maxAGL
+           and CIV.speed(h:getVelocity()) <= scfg.maxSpeed then
+          heloz[#heloz + 1] = { point = hp, name = info.playerName }
+        end
+      end)
       for _, raft in ipairs(evt.rafts) do
         if not raft.done then
           local rescuer = nil
-          CIV.forEachPlayerHelo(function(h, info)
-            if rescuer then return end
-            local hp = h:getPoint()
-            if CIV.dist2D(hp, raft.point) <= scfg.rescueRadius
-               and CIV.agl(hp) <= scfg.maxAGL
-               and CIV.speed(h:getVelocity()) <= scfg.maxSpeed then
-              rescuer = info
+          for _, h in ipairs(heloz) do
+            if CIV.dist2D(h.point, raft.point) <= scfg.rescueRadius then
+              rescuer = h
+              break
             end
-          end)
+          end
           if rescuer then
             raft.dwell = raft.dwell + 2   -- 2 s tick
-            raft.byUnit = rescuer.playerName
+            raft.byUnit = rescuer.name
             if raft.dwell >= scfg.raftHoldSeconds then
               raft.done = true
               if raft.gname then CIV.despawnGroup(raft.gname) end

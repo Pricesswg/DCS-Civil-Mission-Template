@@ -1114,10 +1114,13 @@ if CM.enabled then
     end
     if #events > 0 then
       -- responders on scene, per event: player aircraft close to the
-      -- action (the filmer checks against this list, excluding itself)
+      -- action. Computed LAZILY per event only when someone is actually
+      -- filming it (memoized for this tick), so idle events cost nothing.
       local onScene = {}
-      for _, evt in ipairs(events) do
-        local names = {}
+      local function respondersFor(evt)
+        local names = onScene[evt.key]
+        if names then return names end
+        names = {}
         CIV.forEachPlayer(function(a, ainfo)
           if ainfo.category ~= Unit.Category.HELICOPTER
              and ainfo.category ~= Unit.Category.AIRPLANE then return end
@@ -1126,6 +1129,7 @@ if CM.enabled then
           end
         end)
         onScene[evt.key] = names
+        return names
       end
       -- helicopters AND airplanes: a trainer orbiting the ring films too
       CIV.forEachPlayer(function(u, info)
@@ -1140,8 +1144,9 @@ if CM.enabled then
               local k = info.unitName .. "|" .. evt.key
               filmTime[k] = (filmTime[k] or 0) + 5
               -- ACTION FOOTAGE: another aircraft working the event while
-              -- you film makes the story worth more
-              for name in pairs(onScene[evt.key] or {}) do
+              -- you film makes the story worth more (responders computed
+              -- only now, for the event actually being filmed)
+              for name in pairs(respondersFor(evt)) do
                 if name ~= info.unitName then
                   actionTime[k] = (actionTime[k] or 0) + 5
                   break

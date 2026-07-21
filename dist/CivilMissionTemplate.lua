@@ -3987,21 +3987,29 @@ CIV.schedule(function(_, t)
         evt.recovered .. " survivors recovered, " .. lost .. " lost.", 20)
       closeEvent(sc, evt)
     else
+      -- snapshot the player helicopters in a valid pickup state ONCE per
+      -- tick (position + low + slow), then match rafts against it, instead
+      -- of re-scanning every player for each of the dozen rafts
+      local heloz = {}
+      CIV.forEachPlayerHelo(function(h, info)
+        local hp = h:getPoint()
+        if CIV.agl(hp) <= scfg.maxAGL
+           and CIV.speed(h:getVelocity()) <= scfg.maxSpeed then
+          heloz[#heloz + 1] = { point = hp, name = info.playerName }
+        end
+      end)
       for _, raft in ipairs(evt.rafts) do
         if not raft.done then
           local rescuer = nil
-          CIV.forEachPlayerHelo(function(h, info)
-            if rescuer then return end
-            local hp = h:getPoint()
-            if CIV.dist2D(hp, raft.point) <= scfg.rescueRadius
-               and CIV.agl(hp) <= scfg.maxAGL
-               and CIV.speed(h:getVelocity()) <= scfg.maxSpeed then
-              rescuer = info
+          for _, h in ipairs(heloz) do
+            if CIV.dist2D(h.point, raft.point) <= scfg.rescueRadius then
+              rescuer = h
+              break
             end
-          end)
+          end
           if rescuer then
             raft.dwell = raft.dwell + 2   -- 2 s tick
-            raft.byUnit = rescuer.playerName
+            raft.byUnit = rescuer.name
             if raft.dwell >= scfg.raftHoldSeconds then
               raft.done = true
               if raft.gname then CIV.despawnGroup(raft.gname) end
@@ -6288,10 +6296,13 @@ if CM.enabled then
     end
     if #events > 0 then
       -- responders on scene, per event: player aircraft close to the
-      -- action (the filmer checks against this list, excluding itself)
+      -- action. Computed LAZILY per event only when someone is actually
+      -- filming it (memoized for this tick), so idle events cost nothing.
       local onScene = {}
-      for _, evt in ipairs(events) do
-        local names = {}
+      local function respondersFor(evt)
+        local names = onScene[evt.key]
+        if names then return names end
+        names = {}
         CIV.forEachPlayer(function(a, ainfo)
           if ainfo.category ~= Unit.Category.HELICOPTER
              and ainfo.category ~= Unit.Category.AIRPLANE then return end
@@ -6300,6 +6311,7 @@ if CM.enabled then
           end
         end)
         onScene[evt.key] = names
+        return names
       end
       -- helicopters AND airplanes: a trainer orbiting the ring films too
       CIV.forEachPlayer(function(u, info)
@@ -6314,8 +6326,9 @@ if CM.enabled then
               local k = info.unitName .. "|" .. evt.key
               filmTime[k] = (filmTime[k] or 0) + 5
               -- ACTION FOOTAGE: another aircraft working the event while
-              -- you film makes the story worth more
-              for name in pairs(onScene[evt.key] or {}) do
+              -- you film makes the story worth more (responders computed
+              -- only now, for the event actually being filmed)
+              for name in pairs(respondersFor(evt)) do
                 if name ~= info.unitName then
                   actionTime[k] = (actionTime[k] or 0) + 5
                   break
