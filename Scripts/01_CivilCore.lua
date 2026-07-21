@@ -70,6 +70,7 @@ CIV.Config = {
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
     dropZones         = "CIVIL Drop Zone",            -- emergency supply drop zones (score = accuracy)
     mediaBases        = "CIVIL Media Base",           -- media ground crew depots (the van rolls from here)
+    airshowZones      = "CIVIL Airshow",              -- aerobatic display box (routine flown inside)
     seaSpawn          = "CIVIL Sea Spawn",            -- merchant traffic: route start zones (random point inside)
     seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
     seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
@@ -175,6 +176,7 @@ CIV.Config = {
       trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
       firewatch   = 5,      -- fire spotted early by a preventive patrol
       supplyDrop  = 10,     -- emergency airdrop crate on target, quality = accuracy
+      airshow     = 1,      -- aerobatic routine: figure points are summed into the mult
       coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
       intercept   = 14,     -- restricted-area violator identified and escorted out
       convoy      = 18,     -- prisoner convoy escorted to destination, quality = coverage
@@ -922,6 +924,39 @@ CIV.Config = {
     },
   },
 
+  -- Airshow / aerobatic display (freestyle). Fly a timed routine inside a
+  -- CIVIL Airshow box (F10 to start): a 5 Hz sampler reads the aircraft
+  -- ATTITUDE (from Unit:getPosition orientation vectors) and recognizes a
+  -- set of figures, with live feedback and a variety bonus. The scripting
+  -- API exposes no throttle / AoA / real G, so figures are recognized
+  -- HEURISTICALLY from attitude + velocity: thresholds below are TO TUNE
+  -- in-game. Any airplane may fly it.
+  airshow = {
+    enabled       = true,
+    duration      = 480,     -- s per routine (auto-ends; F10 again ends early)
+    sampleSeconds = 0.2,     -- 5 Hz sampler while a routine is active
+    -- recognition thresholds
+    rollDeg       = 340,     -- accumulated bank sweep that counts as a roll
+    headingTol    = 30,      -- deg, "heading held" tolerance (roll)
+    loopHeadingTol= 45,      -- deg, heading returns to start = loop
+    reversalMin   = 135,     -- deg heading change for Immelmann / Split-S
+    reversalMax   = 225,
+    altChangeMin  = 150,     -- m, altitude delta that makes a climb/descent figure
+    invertedSeconds = 3,     -- s of sustained inverted flight = inverted pass
+    knifeSeconds  = 3,       -- s of sustained knife-edge
+    knifeBank     = { min = 75, max = 105 },   -- deg |bank| band for a knife-edge
+    lowPassAGL    = 60,      -- m, below this + fast + upright = low pass
+    lowPassSpeed  = 80,      -- m/s
+    lowPassRearmAGL = 150,   -- m, must climb above this to re-arm a low pass
+    cooldown      = 3,       -- s between scored figures (anti double-count)
+    varietyBonus  = 0.5,     -- up to +50% of the total for many DISTINCT figures
+    -- points per figure type (summed into the final routine score)
+    figures = {
+      loop = 10, roll = 8, immelmann = 14, splitS = 14,
+      inverted = 8, knife = 12, lowpass = 6,
+    },
+  },
+
   ------------------------------------------------------------------
   -- Session recap: periodic situation summary plus final standings at
   -- mission end (also logged as FINAL| lines for the external parser)
@@ -1166,6 +1201,29 @@ function CIV.bearingDeg(from, to)
   local brg = math.deg(atan2((to.z or to.y) - (from.z or from.y), to.x - from.x))
   if brg < 0 then brg = brg + 360 end
   return brg
+end
+
+-- Aircraft attitude from the orientation vectors of Unit:getPosition()
+-- (pos.x = nose, pos.y = up, pos.z = right; world y is up). Returns pitch
+-- and roll/bank in degrees, heading 0..360, and upY (the up vector's world
+-- vertical component: < 0 = inverted). bank is a full -180..180 angle so a
+-- roll sweeps continuously through knife-edge (+-90) and inverted (+-180).
+function CIV.attitude(unit)
+  local ok, pos = pcall(unit.getPosition, unit)
+  if not ok or not pos then return nil end
+  local nose, up, right = pos.x, pos.y, pos.z
+  local pitch = math.deg(math.asin(math.max(-1, math.min(1, nose.y))))
+  local bank = math.deg(atan2(right.y, up.y))
+  local heading = math.deg(atan2(nose.z, nose.x))
+  if heading < 0 then heading = heading + 360 end
+  return { pitch = pitch, bank = bank, heading = heading, upY = up.y }
+end
+
+-- shortest signed angular difference a->b in -180..180 (degrees)
+function CIV.angDelta(a, b)
+  local d = (b - a) % 360
+  if d > 180 then d = d - 360 end
+  return d
 end
 
 function CIV.offsetPoint(p, bearingDeg, distM)

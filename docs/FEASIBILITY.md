@@ -131,6 +131,14 @@ the optional `CIVIL Sinking` wreck model are TO VALIDATE on the chosen map.
 The co-occurrence budget and fire-kind exclusion are pure director logic,
 no DCS API risk.
 
+**Airshow figure recognition (v0.7)**: attitude comes from
+`Unit:getPosition()` orientation vectors (reliable); the scripting API has
+NO throttle, angle of attack or real G, so figures are recognized
+HEURISTICALLY from attitude + velocity accumulation. Expect to tune the
+thresholds in `airshow` in-game (false positives/negatives on marginal
+figures). The recognition is a pure function (`Airshow.processSample`)
+unit-tested against synthetic loop/roll/inverted sample streams.
+
 ## Corrections / clarifications vs the concept
 
 - **`world.setPersistenceHandler`**: I found NO evidence this exists as a

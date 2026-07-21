@@ -22,7 +22,7 @@ Scripts/
   30_CivilPolice.lua        Police chase (pressure mechanic) + SWAT fast-rope
   40_CivilTransport.lua     Fixed mass tiers + supply airdrops
   45_CivilAviation.lua      Recon, VIP shuttle, media + media van, medical
-                            transfer, tours, supply drops, task board
+                            transfer, tours, supply drops, airshow, task board
   46_CivilAirTraffic.lua    Ambient AI civil flights + restricted-area intercepts
   47_CivilSeaOps.lua        Merchant traffic on sea lanes + coast guard inspections
   50_CivilCommand.lua       Command center marker commands + session recap
@@ -100,6 +100,7 @@ rescue reports name the specific region.
 | `CIVIL Convoy End ...` | Police | 1+ | prisoner convoy destination (prison, courthouse) |
 | `CIVIL Fire LZ ...` | Firefighting | 0+ | hand-picked casualty LZ next to a `CIVIL Fire Point Building` zone (within 500 m); marked with green smoke on the event |
 | `CIVIL Tourist Site ...` | Aviation | 0+ | sightseeing spots (a landmark, a bay, ruins): tours orbit 2-3 of them per run |
+| `CIVIL Airshow ...` | Aviation | 0+ | aerobatic display box: fly a timed routine inside it, figures scored automatically |
 
 ## Mission Editor checklist: units (matched by name prefix)
 
@@ -198,6 +199,18 @@ island is helicopter work; the same patient bound for a hospital on
 another landmass needs the airplane. Thresholds are per-task
 (`vip.fixedWingBeyondKm`, `medTransfer.fixedWingBeyondKm`,
 `tour.fixedWingBeyondKm`).
+
+**Airshow / aerobatic display** (any airplane): mark a `CIVIL Airshow`
+box and pilots can fly a timed freestyle routine inside it (F10 to start,
+F10 again to end early). A 5 Hz sampler reads the aircraft ATTITUDE
+(`CIV.attitude`, derived from `Unit:getPosition` orientation vectors) plus
+velocity and recognizes figures automatically: loop, roll, Immelmann,
+split-S, sustained inverted, knife-edge and low pass, with live "+points"
+feedback. The final score sums the figure points with a variety bonus for
+performing many DISTINCT figures. Recognition is heuristic (the scripting
+API exposes no throttle/AoA/real G), so the thresholds in `airshow` are
+tunable and marked TO TUNE. Nothing to hit, no enemy: it is a community
+show.
 
 **Sightseeing tour**: mark your landmarks with `CIVIL Tourist Site` zones
 and the tour operator opens. A tourist party boards at a VIP pad (offers

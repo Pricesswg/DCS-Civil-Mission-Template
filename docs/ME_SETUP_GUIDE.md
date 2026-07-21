@@ -36,7 +36,7 @@ Scripts/10_CivilFirefighting.lua
 Scripts/20_CivilRescue.lua      (SAR mountain/sea + MedEvac + CASEVAC)
 Scripts/30_CivilPolice.lua      (chase + SWAT)
 Scripts/40_CivilTransport.lua
-Scripts/45_CivilAviation.lua    (recon, VIP, media, transfer, skydive, board)
+Scripts/45_CivilAviation.lua    (recon, VIP, media, transfer, supply, tour, airshow, board)
 Scripts/46_CivilAirTraffic.lua  (ambient AI flights + restricted areas)
 Scripts/47_CivilSeaOps.lua      (merchant lanes + coast guard)
 Scripts/50_CivilCommand.lua     <- LAST (game-master commands + recap)
@@ -79,6 +79,7 @@ in any destination zone.
 | `CIVIL Recon Point ...` | inspection corridor | 5+ zones along a power line or pipeline; anomalies spawn on them |
 | `CIVIL VIP Pad ...` | passenger shuttle + medical transfer pads | at least 2; put them on airfield aprons and both jobs open up to the fixed-wing. Transfer legs pick a destination at least `medTransfer.minLeg` away (default 15 km), so spread the pads out |
 | `CIVIL Drop Zone ...` | emergency supply drop zones | optional; an open field per zone. The zone RADIUS is the scoring scale (accuracy = distance from center vs radius), 300-500 m works well |
+| `CIVIL Airshow ...` | aerobatic display box | optional; a large volume over the crowd/airfield. Pilots fly the routine while inside it; figures are recognized from attitude (thresholds in `airshow`, TO TUNE) |
 | `CIVIL Media Base ...` | media crew depots | optional, near the towns; the CIVIL Media Van template rolls from the nearest one to the event (van task needs both) |
 | `CIVIL Tourist Site ...` | sightseeing tour spots | optional; put them ON the landmarks (castle, bay, ruins), radius 1-2 km. Tours pick 2-3 per run; sites farther than `tour.fixedWingBeyondKm` from the pad make the tour fixed-wing only |
 | `CIVIL Sea Spawn ...` | merchant route start | on open water (a harbor mouth, over the horizon...); ships appear at a random point inside, kept apart from each other |

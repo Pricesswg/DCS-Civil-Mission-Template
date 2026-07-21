@@ -80,6 +80,7 @@ CIV.Config = {
     vipPads           = "CIVIL VIP Pad",              -- passenger shuttle helipads (needs at least 2)
     dropZones         = "CIVIL Drop Zone",            -- emergency supply drop zones (score = accuracy)
     mediaBases        = "CIVIL Media Base",           -- media ground crew depots (the van rolls from here)
+    airshowZones      = "CIVIL Airshow",              -- aerobatic display box (routine flown inside)
     seaSpawn          = "CIVIL Sea Spawn",            -- merchant traffic: route start zones (random point inside)
     seaLane           = "CIVIL Sea Lane",             -- merchant traffic: route waypoint pool (random walk)
     seaDespawn        = "CIVIL Sea Despawn",          -- merchant traffic: route end zones (ship is cleared there)
@@ -185,6 +186,7 @@ CIV.Config = {
       trafficWatch= 6,      -- airplane overwatch assist on a police chase arrest
       firewatch   = 5,      -- fire spotted early by a preventive patrol
       supplyDrop  = 10,     -- emergency airdrop crate on target, quality = accuracy
+      airshow     = 1,      -- aerobatic routine: figure points are summed into the mult
       coastGuard  = 16,     -- merchant inspection (full score when a suspect is boarded)
       intercept   = 14,     -- restricted-area violator identified and escorted out
       convoy      = 18,     -- prisoner convoy escorted to destination, quality = coverage
@@ -932,6 +934,39 @@ CIV.Config = {
     },
   },
 
+  -- Airshow / aerobatic display (freestyle). Fly a timed routine inside a
+  -- CIVIL Airshow box (F10 to start): a 5 Hz sampler reads the aircraft
+  -- ATTITUDE (from Unit:getPosition orientation vectors) and recognizes a
+  -- set of figures, with live feedback and a variety bonus. The scripting
+  -- API exposes no throttle / AoA / real G, so figures are recognized
+  -- HEURISTICALLY from attitude + velocity: thresholds below are TO TUNE
+  -- in-game. Any airplane may fly it.
+  airshow = {
+    enabled       = true,
+    duration      = 480,     -- s per routine (auto-ends; F10 again ends early)
+    sampleSeconds = 0.2,     -- 5 Hz sampler while a routine is active
+    -- recognition thresholds
+    rollDeg       = 340,     -- accumulated bank sweep that counts as a roll
+    headingTol    = 30,      -- deg, "heading held" tolerance (roll)
+    loopHeadingTol= 45,      -- deg, heading returns to start = loop
+    reversalMin   = 135,     -- deg heading change for Immelmann / Split-S
+    reversalMax   = 225,
+    altChangeMin  = 150,     -- m, altitude delta that makes a climb/descent figure
+    invertedSeconds = 3,     -- s of sustained inverted flight = inverted pass
+    knifeSeconds  = 3,       -- s of sustained knife-edge
+    knifeBank     = { min = 75, max = 105 },   -- deg |bank| band for a knife-edge
+    lowPassAGL    = 60,      -- m, below this + fast + upright = low pass
+    lowPassSpeed  = 80,      -- m/s
+    lowPassRearmAGL = 150,   -- m, must climb above this to re-arm a low pass
+    cooldown      = 3,       -- s between scored figures (anti double-count)
+    varietyBonus  = 0.5,     -- up to +50% of the total for many DISTINCT figures
+    -- points per figure type (summed into the final routine score)
+    figures = {
+      loop = 10, roll = 8, immelmann = 14, splitS = 14,
+      inverted = 8, knife = 12, lowpass = 6,
+    },
+  },
+
   ------------------------------------------------------------------
   -- Session recap: periodic situation summary plus final standings at
   -- mission end (also logged as FINAL| lines for the external parser)
@@ -1176,6 +1211,29 @@ function CIV.bearingDeg(from, to)
   local brg = math.deg(atan2((to.z or to.y) - (from.z or from.y), to.x - from.x))
   if brg < 0 then brg = brg + 360 end
   return brg
+end
+
+-- Aircraft attitude from the orientation vectors of Unit:getPosition()
+-- (pos.x = nose, pos.y = up, pos.z = right; world y is up). Returns pitch
+-- and roll/bank in degrees, heading 0..360, and upY (the up vector's world
+-- vertical component: < 0 = inverted). bank is a full -180..180 angle so a
+-- roll sweeps continuously through knife-edge (+-90) and inverted (+-180).
+function CIV.attitude(unit)
+  local ok, pos = pcall(unit.getPosition, unit)
+  if not ok or not pos then return nil end
+  local nose, up, right = pos.x, pos.y, pos.z
+  local pitch = math.deg(math.asin(math.max(-1, math.min(1, nose.y))))
+  local bank = math.deg(atan2(right.y, up.y))
+  local heading = math.deg(atan2(nose.z, nose.x))
+  if heading < 0 then heading = heading + 360 end
+  return { pitch = pitch, bank = bank, heading = heading, upY = up.y }
+end
+
+-- shortest signed angular difference a->b in -180..180 (degrees)
+function CIV.angDelta(a, b)
+  local d = (b - a) % 360
+  if d > 180 then d = d - 360 end
+  return d
 end
 
 function CIV.offsetPoint(p, bearingDeg, distM)
@@ -6546,6 +6604,219 @@ CIV.schedule(function(_, t)
 end, nil, 30)
 
 ----------------------------------------------------------------------
+-- AIRSHOW / AEROBATIC DISPLAY (freestyle)
+-- Fly a timed routine inside a CIVIL Airshow box. A 5 Hz sampler reads
+-- the aircraft attitude (CIV.attitude, from getPosition) and velocity and
+-- recognizes figures HEURISTICALLY (no throttle/AoA/G in the scripting
+-- API). Live feedback per figure, variety bonus, one final score. The
+-- recognition (Airshow.processSample) is a pure state machine so it can
+-- be driven directly in tests.
+----------------------------------------------------------------------
+
+CIV.Airshow = { _routines = {} }
+local AS = CIV.Airshow
+local ASC = C.airshow
+
+local figureLabel = {
+  loop = "LOOP", roll = "ROLL", immelmann = "IMMELMANN", splitS = "SPLIT-S",
+  inverted = "INVERTED PASS", knife = "KNIFE EDGE", lowpass = "LOW PASS",
+}
+
+-- Pure recognition step. s = { pitch, bank, heading, upY, vy, aglm, speed,
+-- t }. Updates the routine state and returns a figure key or nil.
+function AS.processSample(rt, s)
+  local prev = rt.last
+  rt.last = s
+  if not prev then return nil end
+  local dt = s.t - prev.t
+  if dt <= 0 then return nil end
+
+  local fig = nil
+  local inverted = s.upY < 0
+
+  -- ROLL: accumulate the bank sweep while wings are working; reset when
+  -- level and steady
+  local dbank = math.abs(CIV.angDelta(prev.bank, s.bank))
+  if math.abs(s.bank) < 15 and dbank < 5 then
+    rt.bankAccum = 0
+    rt.rollHeadingRef = s.heading
+    rt.rollAltRef = s.aglm
+  else
+    rt.bankAccum = (rt.bankAccum or 0) + dbank
+  end
+  if rt.bankAccum >= ASC.rollDeg
+     and math.abs(CIV.angDelta(rt.rollHeadingRef or prev.heading, s.heading)) <= ASC.headingTol
+     and math.abs(s.aglm - (rt.rollAltRef or s.aglm)) < ASC.altChangeMin then
+    fig = "roll"
+    rt.bankAccum = 0
+  end
+
+  -- LOOP family via an inversion event: went inverted then recovered.
+  -- A roll also inverts, so require the bank to have STAYED low over the
+  -- top (you pitched over, not rolled over) to call it a loop.
+  if inverted and rt.invState ~= "inv" then
+    rt.invState = "inv"
+    rt.invStartHeading = prev.heading
+    rt.invStartAlt = prev.aglm
+    rt.invBankMax = math.abs(s.bank)
+    rt.invConsumed = false
+  elseif inverted then
+    rt.invBankMax = math.max(rt.invBankMax or 0, math.abs(s.bank))
+  elseif rt.invState == "inv" then
+    rt.invState = "up"
+    if not fig and not rt.invConsumed and (rt.invBankMax or 0) < 100 then
+      local hdgD = math.abs(CIV.angDelta(rt.invStartHeading or s.heading, s.heading))
+      local altD = s.aglm - (rt.invStartAlt or s.aglm)
+      if hdgD >= ASC.reversalMin and hdgD <= ASC.reversalMax then
+        fig = (altD > ASC.altChangeMin and "immelmann")
+          or (altD < -ASC.altChangeMin and "splitS") or "loop"
+      elseif hdgD <= ASC.loopHeadingTol then
+        fig = "loop"
+      end
+    end
+  end
+
+  -- SUSTAINED INVERTED PASS (distinct from the brief inversion of a loop)
+  if inverted then
+    rt.invertedSince = rt.invertedSince or s.t
+    if not fig and (s.t - rt.invertedSince) >= ASC.invertedSeconds then
+      fig = "inverted"
+      rt.invConsumed = true       -- do not also score a loop on recovery
+      rt.invertedSince = s.t + 1e9
+    end
+  else
+    rt.invertedSince = nil
+  end
+
+  -- KNIFE EDGE: sustained ~90 deg bank
+  local ab = math.abs(s.bank)
+  if ab >= ASC.knifeBank.min and ab <= ASC.knifeBank.max then
+    rt.knifeSince = rt.knifeSince or s.t
+    if not fig and (s.t - rt.knifeSince) >= ASC.knifeSeconds then
+      fig = "knife"
+      rt.knifeSince = s.t + 1e9
+    end
+  else
+    rt.knifeSince = nil
+  end
+
+  -- LOW PASS: fast and low and upright, re-armed by climbing back up
+  if s.aglm > ASC.lowPassRearmAGL then rt.lowPassArmed = true end
+  if not fig and rt.lowPassArmed and s.aglm < ASC.lowPassAGL
+     and s.speed > ASC.lowPassSpeed and ab < 45 then
+    fig = "lowpass"
+    rt.lowPassArmed = false
+  end
+
+  -- anti double-count cooldown between scored figures
+  if fig then
+    if s.t < (rt.cooldownUntil or 0) then return nil end
+    rt.cooldownUntil = s.t + ASC.cooldown
+  end
+  return fig
+end
+
+local function airshowZoneAt(p)
+  return CIV.Zones.containing(C.zones.airshowZones, p)
+end
+
+local function endRoutine(uname, reason)
+  local rt = AS._routines[uname]
+  if not rt then return end
+  AS._routines[uname] = nil
+  local distinct, types = 0, 0
+  for _ in pairs(ASC.figures) do types = types + 1 end
+  for _ in pairs(rt.figs) do distinct = distinct + 1 end
+  local variety = types > 0 and (distinct / types) or 0
+  local total = math.floor(rt.total * (1 + ASC.varietyBonus * variety) + 0.5)
+  local u = Unit.getByName(uname)
+  local info = CIV.players[uname]
+  if total > 0 and info then
+    -- base=1, quality=1, timeFactor=1 -> points == the mult we pass (total)
+    CIV.Score.award(info.playerName, "airshow", 1, 1, total,
+      string.format("airshow routine (%d figures, %d types)",
+        rt.count, distinct))
+  end
+  CIV.msgAll("AIRSHOW: " .. (info and info.playerName or "display") ..
+    " finished the routine (" .. rt.count .. " figures, " ..
+    total .. " pts)" .. (reason and (" - " .. reason) or "") .. ".", 20)
+end
+
+function AS.toggle(uname)
+  if not ASC.enabled then return end
+  if AS._routines[uname] then
+    endRoutine(uname, "ended by the pilot")
+    return
+  end
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local info = CIV.players[uname]
+  if not info or info.category ~= Unit.Category.AIRPLANE then
+    if u then CIV.msgUnit(u, "The airshow routine is for airplanes.", 10) end
+    return
+  end
+  if not u:inAir() then
+    CIV.msgUnit(u, "Get airborne inside the airshow box first.", 10)
+    return
+  end
+  if #CIV.Zones.byPrefix(C.zones.airshowZones) == 0 then
+    CIV.msgUnit(u, "No '" .. C.zones.airshowZones ..
+      "' box is defined in this mission.", 10)
+    return
+  end
+  if not airshowZoneAt(u:getPoint()) then
+    CIV.msgUnit(u, "You are outside the airshow box.", 10)
+    return
+  end
+  AS._routines[uname] = {
+    startedAt = timer.getTime(), endsAt = timer.getTime() + ASC.duration,
+    total = 0, count = 0, figs = {}, last = nil,
+  }
+  CIV.msgAll("AIRSHOW: " .. info.playerName .. " is starting a display over " ..
+    "the box. Routine time " .. math.floor(ASC.duration / 60) .. " minutes.", 20)
+  CIV.msgUnit(u, "Routine running. Fly your figures inside the box. F10 " ..
+    "again to end early.", 15)
+end
+
+-- single sampler: idles at 1 Hz, samples at ASC.sampleSeconds while any
+-- routine is active
+if ASC.enabled then
+  CIV.schedule(function(_, t)
+    if not next(AS._routines) then return t + 1 end
+    local now = timer.getTime()
+    for uname, rt in pairs(AS._routines) do
+      local u = Unit.getByName(uname)
+      if not u or not u:isExist() then
+        endRoutine(uname, "aircraft lost")
+      elseif now >= rt.endsAt then
+        endRoutine(uname, "time up")
+      else
+        local att = CIV.attitude(u)
+        local p = u:getPoint()
+        if att and airshowZoneAt(p) then
+          local v = u:getVelocity()
+          local horiz = math.sqrt(v.x * v.x + v.z * v.z)
+          local s = {
+            pitch = att.pitch, bank = att.bank, heading = att.heading,
+            upY = att.upY, vy = v.y, aglm = CIV.agl(p),
+            speed = math.sqrt(horiz * horiz + v.y * v.y), t = now,
+          }
+          local fig = AS.processSample(rt, s)
+          if fig then
+            rt.total = rt.total + (ASC.figures[fig] or 0)
+            rt.count = rt.count + 1
+            rt.figs[fig] = (rt.figs[fig] or 0) + 1
+            CIV.msgUnit(u, figureLabel[fig] .. "! +" .. (ASC.figures[fig] or 0) ..
+              "  (routine " .. rt.total .. " pts)", 8)
+          end
+        end
+      end
+    end
+    return t + ASC.sampleSeconds
+  end, nil, 15)
+end
+
+----------------------------------------------------------------------
 -- F10 MENU + EVENT STARTERS
 ----------------------------------------------------------------------
 
@@ -6555,6 +6826,8 @@ CIV.Menu_register(function(gid, uname)
     sub, reportAnomaly, uname)
   missionCommands.addCommandForGroup(gid, "Supply drop: release crates (over the emergency zone)",
     sub, SD.release, uname)
+  missionCommands.addCommandForGroup(gid, "Airshow: start / end display routine (in the box)",
+    sub, AS.toggle, uname)
   missionCommands.addCommandForGroup(gid, "Media: dispatch ground crew to nearest event",
     sub, MV.dispatch, uname)
   if CB.enabled then
