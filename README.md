@@ -217,7 +217,7 @@ G, and no universal smoke-state flag), so the thresholds in `airshow` are
 tunable and marked TO TUNE. Nothing to hit, no enemy: it is a community
 show.
 
-![Airshow allowed maneuvers](docs/airshow_maneuvers.jpg)
+![Airshow allowed maneuvers](docs/airshow_maneuvers.jpeg)
 
 **Sightseeing tour**: mark your landmarks with `CIVIL Tourist Site` zones
 and the tour operator opens. A tourist party boards at a VIP pad (offers
