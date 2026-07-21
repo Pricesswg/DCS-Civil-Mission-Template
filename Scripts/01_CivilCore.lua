@@ -955,6 +955,23 @@ CIV.Config = {
       loop = 10, roll = 8, immelmann = 14, splitS = 14,
       inverted = 8, knife = 12, lowpass = 6,
     },
+
+    -- SMOKE BONUS: figures flown with the display smoke ON pay more. The
+    -- scripting API has no universal "smoke on" flag, so detection is
+    -- HYBRID: an F10 "Smoke ON/OFF" toggle works on every aircraft (honor
+    -- system), and where you map an aircraft type to its smoke DRAW
+    -- ARGUMENT the state is read automatically and overrides the toggle.
+    -- The draw-argument index differs per model and is undocumented: turn
+    -- finder on, use the F10 "find smoke draw arg" command with smoke off
+    -- then on, and the changed index is logged for you to put in drawArgs.
+    smoke = {
+      enabled     = true,
+      bonus       = 0.25,    -- per-figure score multiplier while smoke is on
+      drawArgs    = {},      -- typeName -> draw-argument index (auto-detect); empty = F10 only
+      onThreshold = 0.5,     -- draw-arg value at or above this = smoke on
+      finder      = false,   -- debug: add the "find smoke draw arg" F10 command
+      finderMaxArg= 400,     -- draw-arg indices the finder scans (0..this)
+    },
   },
 
   ------------------------------------------------------------------

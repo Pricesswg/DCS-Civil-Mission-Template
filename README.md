@@ -207,8 +207,13 @@ F10 again to end early). A 5 Hz sampler reads the aircraft ATTITUDE
 velocity and recognizes figures automatically: loop, roll, Immelmann,
 split-S, sustained inverted, knife-edge and low pass, with live "+points"
 feedback. The final score sums the figure points with a variety bonus for
-performing many DISTINCT figures. Recognition is heuristic (the scripting
-API exposes no throttle/AoA/real G), so the thresholds in `airshow` are
+performing many DISTINCT figures. Figures flown with the display **smoke
+on** pay an extra `airshow.smoke.bonus` (+25% by default): detection is
+hybrid, an F10 "declare smoke ON/OFF" toggle works on every aircraft, and
+where you map a type to its smoke draw argument (`smoke.drawArgs`) the
+state is read automatically (a debug finder command discovers the index).
+Recognition is heuristic (the scripting API exposes no throttle/AoA/real
+G, and no universal smoke-state flag), so the thresholds in `airshow` are
 tunable and marked TO TUNE. Nothing to hit, no enemy: it is a community
 show.
 

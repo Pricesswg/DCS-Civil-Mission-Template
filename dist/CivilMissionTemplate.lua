@@ -965,6 +965,23 @@ CIV.Config = {
       loop = 10, roll = 8, immelmann = 14, splitS = 14,
       inverted = 8, knife = 12, lowpass = 6,
     },
+
+    -- SMOKE BONUS: figures flown with the display smoke ON pay more. The
+    -- scripting API has no universal "smoke on" flag, so detection is
+    -- HYBRID: an F10 "Smoke ON/OFF" toggle works on every aircraft (honor
+    -- system), and where you map an aircraft type to its smoke DRAW
+    -- ARGUMENT the state is read automatically and overrides the toggle.
+    -- The draw-argument index differs per model and is undocumented: turn
+    -- finder on, use the F10 "find smoke draw arg" command with smoke off
+    -- then on, and the changed index is logged for you to put in drawArgs.
+    smoke = {
+      enabled     = true,
+      bonus       = 0.25,    -- per-figure score multiplier while smoke is on
+      drawArgs    = {},      -- typeName -> draw-argument index (auto-detect); empty = F10 only
+      onThreshold = 0.5,     -- draw-arg value at or above this = smoke on
+      finder      = false,   -- debug: add the "find smoke draw arg" F10 command
+      finderMaxArg= 400,     -- draw-arg indices the finder scans (0..this)
+    },
   },
 
   ------------------------------------------------------------------
@@ -6613,7 +6630,7 @@ end, nil, 30)
 -- be driven directly in tests.
 ----------------------------------------------------------------------
 
-CIV.Airshow = { _routines = {} }
+CIV.Airshow = { _routines = {}, _smoke = {} }
 local AS = CIV.Airshow
 local ASC = C.airshow
 
@@ -6621,6 +6638,75 @@ local figureLabel = {
   loop = "LOOP", roll = "ROLL", immelmann = "IMMELMANN", splitS = "SPLIT-S",
   inverted = "INVERTED PASS", knife = "KNIFE EDGE", lowpass = "LOW PASS",
 }
+
+-- Is the display smoke on? Hybrid: read the aircraft's smoke DRAW ARGUMENT
+-- when one is mapped for its type (automatic, overrides the toggle), else
+-- fall back to the F10-declared flag (universal, honor system).
+function AS.smokeIsOn(uname)
+  local cfg = ASC.smoke
+  if not cfg or not cfg.enabled then return false end
+  local info = CIV.players[uname]
+  local arg = info and cfg.drawArgs[info.typeName]
+  if arg then
+    local u = Unit.getByName(uname)
+    if u then
+      local ok, val = pcall(u.getDrawArgument, u, arg)
+      if ok and type(val) == "number" then return val >= (cfg.onThreshold or 0.5) end
+    end
+  end
+  return AS._smoke[uname] == true
+end
+
+-- pure: points a figure is worth, with the smoke bonus applied (testable)
+function AS.figurePoints(fig, smokeOn)
+  local pts = ASC.figures[fig] or 0
+  if smokeOn and ASC.smoke and ASC.smoke.enabled then
+    pts = math.floor(pts * (1 + ASC.smoke.bonus) + 0.5)
+  end
+  return pts
+end
+
+-- F10: declare the display smoke on/off (used where no draw arg is mapped)
+function AS.toggleSmoke(uname)
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  AS._smoke[uname] = not AS._smoke[uname]
+  CIV.msgUnit(u, "Airshow smoke declared " ..
+    (AS._smoke[uname] and "ON: figures now pay +" ..
+      math.floor((ASC.smoke.bonus or 0) * 100) .. "%." or "OFF."), 10)
+end
+
+-- debug: snapshot the draw arguments; call with smoke off then on and the
+-- changed index (the smoke arg) is logged, ready for smoke.drawArgs
+AS._argSnap = {}
+function AS.findSmokeArg(uname)
+  local u = Unit.getByName(uname)
+  if not u or not u:isExist() then return end
+  local snap = {}
+  for a = 0, ASC.smoke.finderMaxArg do
+    local ok, v = pcall(u.getDrawArgument, u, a)
+    snap[a] = (ok and type(v) == "number") and v or 0
+  end
+  local prev = AS._argSnap[uname]
+  if not prev then
+    AS._argSnap[uname] = snap
+    CIV.msgUnit(u, "Draw args captured. Now toggle your smoke and run this " ..
+      "again: the changed index is your smoke draw arg (see dcs.log).", 15)
+    return
+  end
+  local changed = 0
+  for a = 0, ASC.smoke.finderMaxArg do
+    if math.abs((snap[a] or 0) - (prev[a] or 0)) > 0.01 then
+      changed = changed + 1
+      CIV.log(string.format("SMOKE ARG FINDER [%s]: draw arg %d changed %.3f -> %.3f",
+        CIV.players[uname] and CIV.players[uname].typeName or "?", a,
+        prev[a] or 0, snap[a] or 0))
+    end
+  end
+  AS._argSnap[uname] = snap
+  CIV.msgUnit(u, "Compared: " .. changed .. " draw arg(s) changed, logged to " ..
+    "dcs.log (look for SMOKE ARG FINDER). Put the smoke one in airshow.smoke.drawArgs.", 15)
+end
 
 -- Pure recognition step. s = { pitch, bank, heading, upY, vy, aglm, speed,
 -- t }. Updates the routine state and returns a figure key or nil.
@@ -6803,10 +6889,14 @@ if ASC.enabled then
           }
           local fig = AS.processSample(rt, s)
           if fig then
-            rt.total = rt.total + (ASC.figures[fig] or 0)
+            local smoke = AS.smokeIsOn(uname)
+            local pts = AS.figurePoints(fig, smoke)
+            rt.total = rt.total + pts
             rt.count = rt.count + 1
             rt.figs[fig] = (rt.figs[fig] or 0) + 1
-            CIV.msgUnit(u, figureLabel[fig] .. "! +" .. (ASC.figures[fig] or 0) ..
+            CIV.msgUnit(u, figureLabel[fig] .. "! +" .. pts ..
+              (smoke and (" (smoke +" ..
+                math.floor((ASC.smoke.bonus or 0) * 100) .. "%)") or "") ..
               "  (routine " .. rt.total .. " pts)", 8)
           end
         end
@@ -6828,6 +6918,14 @@ CIV.Menu_register(function(gid, uname)
     sub, SD.release, uname)
   missionCommands.addCommandForGroup(gid, "Airshow: start / end display routine (in the box)",
     sub, AS.toggle, uname)
+  if ASC.enabled and ASC.smoke and ASC.smoke.enabled then
+    missionCommands.addCommandForGroup(gid, "Airshow: declare smoke ON / OFF",
+      sub, AS.toggleSmoke, uname)
+    if ASC.smoke.finder then
+      missionCommands.addCommandForGroup(gid, "Airshow: find smoke draw arg (debug)",
+        sub, AS.findSmokeArg, uname)
+    end
+  end
   missionCommands.addCommandForGroup(gid, "Media: dispatch ground crew to nearest event",
     sub, MV.dispatch, uname)
   if CB.enabled then

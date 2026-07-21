@@ -130,8 +130,10 @@ from that event pay a bonus on top of the action footage.
 AIRSHOW (any airplane). Inside a CIVIL Airshow box, start a routine via
 F10 and fly your display: loops, rolls, Immelmanns, split-S, inverted and
 knife-edge passes, low passes are recognized automatically with live
-feedback. Mix DIFFERENT figures for a variety bonus. F10 again ends the
-routine early; otherwise it closes on the clock and tallies your score.
+feedback. Mix DIFFERENT figures for a variety bonus. Fly with your display SMOKE on
+for extra points (F10 "declare smoke ON/OFF", or automatic if your type is
+mapped). F10 the routine again to end it early; otherwise it closes on the
+clock and tallies your score.
 
 FIXED-WING PILOTS (Bronco, MB-339, L-39, C-101, Yak-52...): every airplane
 can spot. Orbit a fire region to relay fire positions, overfly a rescue
