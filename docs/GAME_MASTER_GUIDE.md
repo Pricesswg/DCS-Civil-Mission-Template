@@ -43,6 +43,8 @@ civil fire building 7  structural fire on that exact building: the
                        not the water)
 civil sarm 5           mountain SAR subject at the marker
 civil sars 6           sea SAR subject (marker must be on open water)
+civil sinking 9        sinking-ship mass rescue on open water (rafts to
+                       recover; needs a CIVIL Raft template)
 civil medevac 9        civilian casualty, criticality scales with severity
 civil casevac          battlefield casualty, random severity
 civil swat 7           SWAT objective (announces the operators required)

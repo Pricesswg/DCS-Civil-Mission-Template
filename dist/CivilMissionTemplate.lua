@@ -99,6 +99,8 @@ CIV.Config = {
     survivor = "CIVIL Survivor",   -- ground group: SAR mountain / medevac casualty
     casualty = "CIVIL Casualty",   -- ground group: battlefield CASEVAC casualty
     boat     = "CIVIL Boat",       -- ship group: SAR sea target
+    sinking  = "CIVIL Sinking",    -- ship group: sinking-ship wreck (optional visual)
+    raft     = "CIVIL Raft",       -- ship group: life raft (sinking scenario survivor)
     vessel   = "CIVIL Vessel",     -- ship group: spawned rescue boat
     swatTeam = "CIVIL SWAT Team",  -- ground group: SWAT squad (unit count from template scaled at spawn)
     fugitive = "CIVIL Fugitive",   -- vehicle group: police chase car
@@ -117,6 +119,7 @@ CIV.Config = {
   fallbackTypes = {
     survivor   = "Soldier M4",
     boat       = "ZWEZDNY",        -- TO VALIDATE on the chosen map
+    raft       = "speedboat",      -- life raft fallback, TO VALIDATE type name
     rescueBoat = "speedboat",      -- stock small boat, TO VALIDATE type name
     swat       = "Soldier M4",
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
@@ -167,6 +170,7 @@ CIV.Config = {
       fireC130    = 12,
       sarMountain = 20,
       sarSea      = 25,     -- sea SAR with waves is worth more than flat transport
+      sinking     = 12,     -- per survivor recovered from a sinking (many per event)
       medevac     = 20,
       casevac     = 22,     -- battlefield extraction: hostile setting premium
       chase       = 15,
@@ -309,8 +313,12 @@ CIV.Config = {
       { name = "forest fire",     weight = 70, smokeOnly = false, growMult = 1.0, match = "forest" },
       { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill",
         startSize = 3, compact = true },
+      -- an industrial/factory fire is unlikely to break out while a wildfire
+      -- outbreak is under way: suppressedBy drops this kind's pick weight to
+      -- near zero if any active fire's kind matches one in the list. Scattered
+      -- forest fires can still coexist among themselves.
       { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial",
-        startSize = 3, compact = true },
+        startSize = 3, compact = true, suppressedBy = { "forest" } },
       -- Building fires NEVER roll on generic points (weight 0): they only
       -- ignite on fire points whose zone name contains "building", or on
       -- GM command. Structural firefighting is precision work: helicopter
@@ -423,6 +431,27 @@ CIV.Config = {
                  file = "l10-beacon.ogg", freqHz = 40500000, modulation = 1, power = 100 },
     },
     sarSea  = { maxActive = 2, severity = { min = 1, max = 10 }, beacon = { enabled = false } },
+
+    -- Sinking ship (mass rescue, RARE): a vessel is going down and a dozen
+    -- survivors are in life rafts scattered around the wreck. Same intel
+    -- fog as the other sea SAR (approximate circle, a spotter reveals the
+    -- exact area), but recovery is per-raft: a helicopter holds a brief
+    -- hover over a raft to pull those survivors aboard, one raft at a time.
+    -- The deadline is the ship going down for good: rafts not reached by
+    -- then are lost. Needs a "CIVIL Raft" template (no template = no
+    -- scenario); the "CIVIL Sinking" wreck model is optional visual.
+    sinking = {
+      maxActive     = 1,
+      severity      = { min = 6, max = 10 },  -- it is the grave tier
+      raftCount     = { min = 8, max = 12 },  -- survivors in rafts, rolled per event
+      spreadRadius  = 400,     -- m, rafts scattered this far around the wreck
+      raftHoldSeconds = 15,    -- s of steady hover over a raft to recover it
+      rescueRadius  = 40,      -- m, horizontal distance to a raft
+      maxAGL        = 25,      -- m, hover height band for the pickup
+      maxSpeed      = 3.0,     -- m/s, must be near-stationary
+      deadline      = 2400,    -- s baseline before the ship goes down (scaled by severity)
+    },
+
     medevac = {
       maxActive   = 2,
       criticality = 1800,  -- s baseline, scaled by severity (see severityEffects)
@@ -618,7 +647,6 @@ CIV.Config = {
     interval = { min = 480, max = 1200 },
     chance   = {   -- module key -> probability % (0 = manual start only)
       sarMountain = 25,
-      sarSea      = 20,
       medevac     = 25,
       casevac     = 20,
       chase       = 25,
@@ -626,13 +654,35 @@ CIV.Config = {
       transport   = 40,
       recon       = 20,
       vip         = 20,
-      inspection  = 20,
+      seaEvent    = 30,   -- ONE sea roll, tier picked by weight (see seaTiers)
       convoy      = 15,
       tour        = 15,
       supply      = 20,
       -- fires have their own dedicated scheduler (fire.autoIgnite);
       -- sea/air ambient traffic have their own spawn schedulers too
     },
+
+    -- Sea event RARITY tiers: the "seaEvent" roll weighted-picks WHICH sea
+    -- event to start. Ship inspection is the everyday job, a sea rescue is
+    -- less common, a sinking with many survivors is rare. If the picked
+    -- tier cannot start (e.g. inspection with no merchant at sea) the roll
+    -- falls through to the next-most-likely tier so it is not wasted.
+    seaTiers = {
+      { key = "inspection", weight = 60 },
+      { key = "sarSea",     weight = 30 },
+      { key = "sarSinking", weight = 10 },
+    },
+
+    -- CO-OCCURRENCE BUDGET: keep too many SEVERE events from piling up. The
+    -- director sums the severity of the active "serious" events across every
+    -- module (CIV.severityLoad) and scales every chance down as the load
+    -- approaches severityBudget, reaching zero at the budget. Grave events
+    -- weigh more, so they choke the pipeline hardest: a raging wildfire (its
+    -- severity counts too) quiets the other callouts on its own. Light tasks
+    -- (recon/vip/tour/media/transport) are NOT counted, they never crowd
+    -- each other out. Fires keep their own scheduler and are not throttled,
+    -- only counted.
+    severityBudget = 24,
   },
 
   ------------------------------------------------------------------
@@ -1039,6 +1089,39 @@ end
 function CIV.severityMult(sev)
   local s = CIV.Config.score.severity
   return s.base + s.perPoint * math.max(1, math.min(10, sev))
+end
+
+-- Total severity currently in play across the SERIOUS event types, summed
+-- read-only from each module's active collection (all guarded, so unloaded
+-- modules contribute nothing). Drives the director co-occurrence budget:
+-- the busier and graver the map, the fewer new callouts. Light tasks
+-- (recon/vip/tour/media/transport) are deliberately excluded.
+function CIV.severityLoad()
+  local load = 0
+  if CIV.Fire then
+    for _, fire in pairs(CIV.Fire.actives()) do load = load + (fire.severity or 0) end
+  end
+  if CIV.Rescue then
+    for _, sc in pairs(CIV.Rescue._scenarios) do
+      for _, evt in pairs(sc.events) do load = load + (evt.severity or 0) end
+    end
+  end
+  if CIV.Police then
+    for _, chase in pairs(CIV.Police._chases) do load = load + (chase.severity or 0) end
+  end
+  if CIV.SWAT then
+    for _, scen in pairs(CIV.SWAT._scenarios) do load = load + (scen.severity or 0) end
+  end
+  if CIV.Convoy then
+    for _, run in pairs(CIV.Convoy._runs) do load = load + (run.severity or 0) end
+  end
+  if CIV.CoastGuard then
+    for _, task in pairs(CIV.CoastGuard._tasks) do load = load + (task.severity or 0) end
+  end
+  if CIV.SupplyDrop then
+    for _, evt in pairs(CIV.SupplyDrop._events) do load = load + (evt.severity or 0) end
+  end
+  return load
 end
 
 -- weighted random pick from a list of { weight = n, ... } entries
@@ -2035,14 +2118,45 @@ CIV.EventStarters = {}
 
 -- Keeps rescheduling even while disabled, so the command center can turn
 -- the automatic director off and on again at runtime ("civil director on").
+-- One sea roll picks WHICH sea event to start, by rarity weight, falling
+-- through to the next tier when the picked one cannot start (e.g. no
+-- merchant at sea for an inspection).
+local function startSeaEvent()
+  local tiers = {}
+  for _, tier in ipairs(CIV.Config.director.seaTiers) do
+    tiers[#tiers + 1] = { key = tier.key, weight = tier.weight }
+  end
+  while #tiers > 0 do
+    local pick = CIV.weightedPick(tiers)
+    local starter = CIV.EventStarters[pick.key]
+    if starter then
+      local ok, res = pcall(starter.fn)
+      if ok and res then return res end
+    end
+    -- picked tier could not start: drop it and try the next
+    for i, tier in ipairs(tiers) do
+      if tier.key == pick.key then table.remove(tiers, i) break end
+    end
+  end
+  return nil
+end
+
 CIV.schedule(function(_, t)
   local cfg = CIV.Config.director
   if cfg.enabled then
+    -- co-occurrence budget: throttle every chance as the severity load
+    -- climbs, reaching zero at the budget (grave events choke hardest)
+    local factor = math.max(0, 1 - CIV.severityLoad() / cfg.severityBudget)
     for key, chance in pairs(cfg.chance) do
-      local starter = CIV.EventStarters[key]
-      if starter and math.random(100) <= chance then
-        local ok, err = pcall(starter.fn)
-        if not ok then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
+      if math.random(100) <= chance * factor then
+        local ok, err
+        if key == "seaEvent" then
+          ok, err = pcall(startSeaEvent)
+        else
+          local starter = CIV.EventStarters[key]
+          if starter then ok, err = pcall(starter.fn) end
+        end
+        if ok == false then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
       end
     end
   end
@@ -2283,6 +2397,31 @@ local function kindForPointName(name)
   return nil
 end
 
+-- Weighted kind pick that honors co-occurrence: a kind flagged
+-- suppressedBy = { "forest", ... } drops to a residual weight while any
+-- active fire's match is in that list (a factory fire is unlikely to break
+-- out during a wildfire outbreak; scattered forest fires still coexist).
+local function pickKind()
+  local active = {}
+  for _, fire in pairs(Fire._fires) do
+    if fire.kindDef.match then active[fire.kindDef.match] = true end
+  end
+  local candidates = {}
+  for _, kind in ipairs(CF.kinds) do
+    local weight = kind.weight
+    if weight > 0 and kind.suppressedBy then
+      for _, m in ipairs(kind.suppressedBy) do
+        if active[m] then weight = math.max(1, math.floor(weight * 0.05)) break end
+      end
+    end
+    if weight > 0 then
+      candidates[#candidates + 1] = { weight = weight, kind = kind }
+    end
+  end
+  if #candidates == 0 then return CIV.weightedPick(CF.kinds) end
+  return CIV.weightedPick(candidates).kind
+end
+
 -- GM kind lookup by fragment ("building" -> the building fire kind)
 function Fire.kindByFragment(fragment)
   if not fragment then return nil end
@@ -2300,8 +2439,7 @@ function Fire.ignite(pt, severityOverride, kindOverride)
   Fire._fid = Fire._fid + 1
   -- kind: forced by the GM, else by the point's zone name, else rolled by
   -- weight (forest mostly; building fires never roll, weight 0)
-  local kindDef = kindOverride or kindForPointName(pt.name)
-    or CIV.weightedPick(CF.kinds)
+  local kindDef = kindOverride or kindForPointName(pt.name) or pickKind()
   local fire = {
     id = Fire._fid, pt = pt, kindDef = kindDef,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },
@@ -3318,6 +3456,13 @@ local function closeEvent(sc, evt)
   CIV.unmark(evt.markId)
   CIV.unmark(evt.circleId)
   if evt.gname then CIV.despawnGroup(evt.gname) end
+  -- sinking scenario: clear any rafts still afloat
+  if evt.rafts then
+    for _, raft in ipairs(evt.rafts) do
+      if raft.gname then CIV.despawnGroup(raft.gname) end
+    end
+    evt.rafts = nil
+  end
 end
 
 -- command center: close an event without any outcome
@@ -3730,6 +3875,153 @@ CIV.schedule(function(_, t)
 end, nil, 25)
 
 ----------------------------------------------------------------------
+-- SINKING SHIP (mass rescue, rare tier)
+-- A vessel is going down with a dozen survivors in life rafts scattered
+-- around the wreck. Same intel fog as the other sea SAR (approximate
+-- circle, a spotter reveals the exact area via the shared spotter loop),
+-- but recovery is PER RAFT: a helicopter holds a brief hover over a raft
+-- to pull those survivors aboard, one raft at a time, until the ship goes
+-- down (the deadline) and any raft not reached is lost. Needs a "CIVIL
+-- Raft" template; the "CIVIL Sinking" wreck model is optional visual.
+----------------------------------------------------------------------
+
+-- opts (command center): { point = vec3 (must be water), severity = 1..10 }
+function R.startSinking(opts)
+  local sc = R._scenarios.SAR_SINKING
+  if not sc then return nil end
+  local scfg = C.rescue.sinking
+  -- no raft template, no scenario (nothing to rescue)
+  if #CIV.Templates.byPrefix(C.templates.raft) == 0 then
+    CIV.dbg("Sinking: no '" .. C.templates.raft .. "' template, scenario skipped")
+    return nil
+  end
+  local n = 0
+  for _ in pairs(sc.events) do n = n + 1 end
+  if not (opts and opts.point) and n >= scfg.maxActive then return nil end
+
+  local pt
+  if opts and opts.point then
+    if not CIV.isWater(opts.point) then
+      CIV.msgAll("Sinking ship: commanded position is not on open water.", 10)
+      return nil
+    end
+    sc._gmid = (sc._gmid or 0) + 1
+    pt = { name = "GM sinking " .. sc._gmid, radius = 100,
+           point = { x = opts.point.x, y = 0, z = opts.point.z } }
+  else
+    pt = CIV.Pool.pick(C.zones.sarSeaPoints, 1000)
+    if not pt then return nil end
+  end
+
+  sc._eid = sc._eid + 1
+  local sev = (opts and opts.severity)
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity(scfg.severity)
+  local se = C.rescue.severityEffects
+  local evt = {
+    id = sc._eid, pt = pt, point = pt.point, severity = sev,
+    scKey = "SAR_SINKING", spawnTime = timer.getTime(),
+    identified = false, rafts = {}, recovered = 0,
+  }
+  evt.deadlineTotal = scfg.deadline
+    * CIV.sevLerp(sev, se.deadlineFactor.atMin, se.deadlineFactor.atMax)
+  evt.deadline = timer.getTime() + evt.deadlineTotal
+
+  -- optional wreck model at the centre (closeEvent despawns evt.gname)
+  evt.gname = CIV.spawnFromTemplate(C.templates.sinking, pt.point)
+
+  -- scatter the rafts around the wreck, each its own group
+  local count = math.random(scfg.raftCount.min, scfg.raftCount.max)
+  for i = 1, count do
+    local rp = CIV.offsetPoint(pt.point, math.random(0, 359),
+      math.random(30, scfg.spreadRadius))
+    local gname = CIV.spawnBoat(rp, "CIVIL_RAFT", C.templates.raft, C.fallbackTypes.raft)
+    evt.rafts[i] = { gname = gname, point = rp, done = false, dwell = 0, byUnit = nil }
+  end
+
+  -- intel fog: approximate off-centre circle, exact area needs a spotter
+  local intel = C.rescue.intel
+  local circleRadius = CIV.randBetween(intel.approxRadius)
+  local circleCenter = CIV.offsetPoint(evt.point, math.random(0, 359),
+    circleRadius * CIV.randBetween(intel.centerOffset))
+  evt.approxCenter = circleCenter
+  evt.circleId = CIV.markCircle(circleCenter,
+    "Sinking ship #" .. evt.id .. " search area", circleRadius)
+
+  local refPoint, refName = vagueReference(sc.def, evt.point)
+  evt.vagueText = refPoint
+    and CIV.vagueDirection(refPoint, refName, evt.point) or "position unknown"
+
+  sc.events[evt.id] = evt
+  CIV.Pool.occupy(pt)
+  CIV.msgAll("MAYDAY - SINKING SHIP (severity " .. sev .. "/10): " .. count ..
+    " survivors in life rafts, " .. evt.vagueText ..
+    ".\nApproximate search area marked on the F10 map; a spotter overhead " ..
+    "pins the exact area. Hover briefly over each raft to pull them aboard." ..
+    "\nThe ship goes down in about " .. math.floor(evt.deadlineTotal / 60) ..
+    " minutes: every raft not reached by then is lost.", 30)
+  CIV.log("Sinking #" .. evt.id .. " at " .. pt.name .. " severity " .. sev ..
+    " rafts " .. count)
+  return evt
+end
+
+-- raft recovery loop: a brief steady hover over a raft pulls it aboard
+CIV.schedule(function(_, t)
+  local sc = R._scenarios.SAR_SINKING
+  if not sc then return t + 5 end
+  local scfg = C.rescue.sinking
+  local now = timer.getTime()
+  for _, evt in pairs(sc.events) do
+    if now > evt.deadline then
+      local lost = 0
+      for _, raft in ipairs(evt.rafts) do if not raft.done then lost = lost + 1 end end
+      CIV.msgAll("SINKING SHIP #" .. evt.id .. ": the vessel has gone down. " ..
+        evt.recovered .. " survivors recovered, " .. lost .. " lost.", 20)
+      closeEvent(sc, evt)
+    else
+      for _, raft in ipairs(evt.rafts) do
+        if not raft.done then
+          local rescuer = nil
+          CIV.forEachPlayerHelo(function(h, info)
+            if rescuer then return end
+            local hp = h:getPoint()
+            if CIV.dist2D(hp, raft.point) <= scfg.rescueRadius
+               and CIV.agl(hp) <= scfg.maxAGL
+               and CIV.speed(h:getVelocity()) <= scfg.maxSpeed then
+              rescuer = info
+            end
+          end)
+          if rescuer then
+            raft.dwell = raft.dwell + 2   -- 2 s tick
+            raft.byUnit = rescuer.playerName
+            if raft.dwell >= scfg.raftHoldSeconds then
+              raft.done = true
+              if raft.gname then CIV.despawnGroup(raft.gname) end
+              evt.recovered = evt.recovered + 1
+              local timeFactor = math.max(0, (evt.deadline - now) / evt.deadlineTotal)
+              CIV.Score.award(raft.byUnit, "sinking", 0.8, timeFactor,
+                CIV.severityMult(evt.severity), "sinking-ship rescue")
+              CIV.msgAll("SINKING SHIP #" .. evt.id .. ": " .. raft.byUnit ..
+                " pulled a raft aboard (" .. evt.recovered .. "/" ..
+                #evt.rafts .. " survivors safe).", 12)
+              if evt.recovered >= #evt.rafts then
+                CIV.msgAll("SINKING SHIP #" .. evt.id ..
+                  ": ALL survivors recovered. Outstanding work.", 20)
+                closeEvent(sc, evt)
+                break
+              end
+            end
+          else
+            raft.dwell = 0
+          end
+        end
+      end
+    end
+  end
+  return t + 2
+end, nil, 25)
+
+----------------------------------------------------------------------
 -- SCENARIO INSTANCES
 ----------------------------------------------------------------------
 
@@ -3756,6 +4048,15 @@ R.newScenario({
   maxActive = C.rescue.sarSea.maxActive, beacon = C.rescue.sarSea.beacon,
   severityRange = C.rescue.sarSea.severity,
   scoreType = "sarSea", hoverCfg = C.hover.sarSea,
+})
+
+-- Sinking ship shares the sea region (spotter reveal + vague reference)
+-- but its own recovery mechanic lives in R.startSinking / the raft loop.
+R.newScenario({
+  key = "SAR_SINKING", label = "Sinking ship", kind = "sinking",
+  poolPrefix = C.zones.sarSeaPoints, region = C.zones.sarSeaRegion,
+  maxActive = C.rescue.sinking.maxActive,
+  severityRange = C.rescue.sinking.severity, scoreType = "sinking",
 })
 
 R.newScenario({
@@ -3810,6 +4111,8 @@ CIV.EventStarters.sarMountain = { label = "SAR Mountain",
   fn = function() return R.startEvent("SAR_MOUNTAIN") end }
 CIV.EventStarters.sarSea = { label = "SAR Sea",
   fn = function() return R.startEvent("SAR_SEA") end }
+CIV.EventStarters.sarSinking = { label = "Sinking ship (mass rescue)",
+  fn = function() return R.startSinking() end }
 CIV.EventStarters.medevac = { label = "MedEvac",
   fn = function() return R.startEvent("MEDEVAC") end }
 CIV.EventStarters.casevac = { label = "Battlefield CASEVAC",
@@ -6960,6 +7263,7 @@ CIV.log("CivilSeaOps loaded")
 --                             (forest/landfill/industrial/building)
 --   civil sarm [sev]          mountain SAR subject at the marker
 --   civil sars [sev]          sea SAR subject at the marker (must be water)
+--   civil sinking [sev]       sinking-ship mass rescue at the marker (water)
 --   civil medevac [sev]       MedEvac casualty at the marker
 --   civil casevac [sev]       battlefield casualty at the marker
 --   civil swat [sev]          SWAT objective at the marker
@@ -7191,6 +7495,13 @@ for word, key in pairs(rescueKeys) do
   end
 end
 
+commands.sinking = function(args, point)
+  if not (CIV.Rescue and CIV.Rescue.startSinking) then moduleMissing("rescue") return end
+  if not CIV.Rescue.startSinking({ point = point, severity = toSeverity(args[1]) }) then
+    say("sinking command failed (needs open water and a CIVIL Raft template).")
+  end
+end
+
 commands.swat = function(args, point)
   if not CIV.SWAT then moduleMissing("police") return end
   if not CIV.SWAT.startScenario({ point = point, severity = toSeverity(args[1]) }) then
@@ -7358,7 +7669,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|supply|inspect [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|sinking|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|supply|inspect [severity]\n" ..
     CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..

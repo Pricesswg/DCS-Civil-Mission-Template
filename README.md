@@ -78,7 +78,7 @@ rescue reports name the specific region.
 | `CIVIL SAR Mountain Region ...` | Rescue | 1+ | macro-region(s) for mountain SAR (spotter + vague-direction reference); two separate mountains = two zones |
 | `CIVIL SAR Mountain Point ...` | Rescue | 3+ | survivor spots reachable in a hover |
 | `CIVIL SAR Sea Region ...` | Rescue | 1+ | macro-region(s) for sea SAR |
-| `CIVIL SAR Sea Point ...` | Rescue | 3+ | on OPEN water (a boat spawns there) |
+| `CIVIL SAR Sea Point ...` | Rescue | 3+ | on OPEN water (a boat, or a sinking wreck + rafts, spawns there) |
 | `CIVIL Vessel Spawn ...` | Rescue | 1+ | rescue-boat harbors, on water. Balance rule: distance to the SAR points / 9 m/s should be slightly LONGER than the hover window (default 25 min ~ 13.5 km) |
 | `CIVIL Medevac Point ...` | Rescue | 3+ | civilian casualty LZs (accidents, unsafe areas) |
 | `CIVIL Casevac Point ...` | Rescue | 3+ | battlefield extraction LZs. **User-built static areas**: dress them with your own battlefield assets |
@@ -118,6 +118,8 @@ used when absent):**
 | `CIVIL Survivor ...` | mountain SAR / MedEvac subject | `Soldier M4` |
 | `CIVIL Casualty ...` | battlefield CASEVAC casualty | `Soldier M4` |
 | `CIVIL Boat ...` | sea SAR target | `ZWEZDNY` |
+| `CIVIL Sinking ...` | sinking-ship wreck (optional visual) | none (no wreck model) |
+| `CIVIL Raft ...` | life raft (sinking-ship survivors) | `speedboat` |
 | `CIVIL Vessel ...` | spawned rescue boat | `speedboat` |
 | `CIVIL SWAT Team ...` | SWAT squad | `Soldier M4` |
 | `CIVIL Fugitive ...` | police chase car | `LandRover_ah` |
@@ -348,6 +350,37 @@ parameters derive, announced in every report ("MedEvac severity 8"):
 | Transport ("priority") | time to live of the load (priority 10 expires in 45 min) and score |
 
 Score multiplier is anchored at `0.7 + 0.06 * severity`: severity 5 = x1.0.
+
+## Keeping it plausible: co-occurrence and rarity
+
+The automatic director does not fire every callout independently. Three
+rules keep the map believable:
+
+- **Severity budget** (`director.severityBudget`): the director sums the
+  severity of the active SERIOUS events across every module and scales all
+  its chances down as that load climbs, reaching zero at the budget. Grave
+  events weigh most, so a raging wildfire quiets the other callouts on its
+  own. Light tasks (recon, VIP, tour, media, transport) are not counted and
+  never crowd each other out. Fires keep their own scheduler (scattered
+  wildfires stay possible) but their severity still counts toward the
+  budget.
+- **Fire kind exclusion** (`fire.kinds[*].suppressedBy`): an industrial
+  (factory) fire is very unlikely to break out while a wildfire is already
+  burning. Scattered forest fires still coexist.
+- **Sea event rarity** (`director.seaTiers`): a single sea roll picks WHICH
+  sea event happens, by weight: a coast-guard **inspection** is the everyday
+  job, a **sea rescue** is less common, a **sinking ship** with a dozen
+  survivors is rare. If the picked tier cannot start (e.g. no merchant at
+  sea) the roll falls through to the next tier.
+
+**Sinking ship (mass rescue)**: the rare sea tier. A vessel goes down with
+8-12 survivors in life rafts scattered around the wreck (`CIVIL Raft`
+template required, `CIVIL Sinking` wreck model optional). Same intel fog as
+the other sea SAR: an approximate circle, a spotter reveals the exact area.
+Recovery is per raft: hold a brief hover (~15 s) over each raft to pull
+those survivors aboard, one at a time, before the ship goes down (the
+deadline). Every raft reached scores; rafts not reached in time are lost.
+`civil sinking 9` starts one at the marker.
 
 ## Command center (game master)
 

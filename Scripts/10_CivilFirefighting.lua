@@ -132,6 +132,31 @@ local function kindForPointName(name)
   return nil
 end
 
+-- Weighted kind pick that honors co-occurrence: a kind flagged
+-- suppressedBy = { "forest", ... } drops to a residual weight while any
+-- active fire's match is in that list (a factory fire is unlikely to break
+-- out during a wildfire outbreak; scattered forest fires still coexist).
+local function pickKind()
+  local active = {}
+  for _, fire in pairs(Fire._fires) do
+    if fire.kindDef.match then active[fire.kindDef.match] = true end
+  end
+  local candidates = {}
+  for _, kind in ipairs(CF.kinds) do
+    local weight = kind.weight
+    if weight > 0 and kind.suppressedBy then
+      for _, m in ipairs(kind.suppressedBy) do
+        if active[m] then weight = math.max(1, math.floor(weight * 0.05)) break end
+      end
+    end
+    if weight > 0 then
+      candidates[#candidates + 1] = { weight = weight, kind = kind }
+    end
+  end
+  if #candidates == 0 then return CIV.weightedPick(CF.kinds) end
+  return CIV.weightedPick(candidates).kind
+end
+
 -- GM kind lookup by fragment ("building" -> the building fire kind)
 function Fire.kindByFragment(fragment)
   if not fragment then return nil end
@@ -149,8 +174,7 @@ function Fire.ignite(pt, severityOverride, kindOverride)
   Fire._fid = Fire._fid + 1
   -- kind: forced by the GM, else by the point's zone name, else rolled by
   -- weight (forest mostly; building fires never roll, weight 0)
-  local kindDef = kindOverride or kindForPointName(pt.name)
-    or CIV.weightedPick(CF.kinds)
+  local kindDef = kindOverride or kindForPointName(pt.name) or pickKind()
   local fire = {
     id = Fire._fid, pt = pt, kindDef = kindDef,
     point = { x = pt.point.x, y = pt.point.y, z = pt.point.z },

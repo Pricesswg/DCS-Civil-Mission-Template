@@ -200,6 +200,8 @@ the event runs anyway.
 | `CIVIL Survivor ...` | mountain SAR missing person / MedEvac casualty (ground) | `Soldier M4` |
 | `CIVIL Casualty ...` | battlefield CASEVAC casualty (ground) | `Soldier M4` |
 | `CIVIL Boat ...` | sea SAR target (ship) | `ZWEZDNY` |
+| `CIVIL Sinking ...` | sinking-ship wreck, optional visual (ship) | none |
+| `CIVIL Raft ...` | life raft, sinking-ship survivors (ship) | `speedboat` (TO VALIDATE) |
 | `CIVIL Vessel ...` | spawned rescue boat (ship) | `speedboat` |
 | `CIVIL SWAT Team ...` | SWAT squad (ground; unit count scaled at insertion) | `Soldier M4` |
 | `CIVIL Fugitive ...` | fleeing car (vehicle) | `LandRover_ah` |

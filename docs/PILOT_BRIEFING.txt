@@ -43,7 +43,10 @@ identifies the subject, so a C-130 on station is worth a lot. Extraction:
 hold a steady hover over the subject; sloppy hovering slows the timer and
 the window is not forever. At sea, rescue vessels also steam toward the
 search area: if you are too slow they may finish the job, and the credit
-goes to the spotter.
+goes to the spotter. Rarely a ship is SINKING with a dozen survivors in
+rafts around the wreck: find the area (a spotter reveals it), then hover
+briefly over each raft to pull it aboard before she goes under. Every raft
+you reach counts; the ones you do not are lost.
 
 MEDEVAC AND BATTLEFIELD CASEVAC. A casualty with a criticality clock.
 High severity means a short clock: check the minutes in the callout before

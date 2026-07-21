@@ -232,6 +232,13 @@ local function closeEvent(sc, evt)
   CIV.unmark(evt.markId)
   CIV.unmark(evt.circleId)
   if evt.gname then CIV.despawnGroup(evt.gname) end
+  -- sinking scenario: clear any rafts still afloat
+  if evt.rafts then
+    for _, raft in ipairs(evt.rafts) do
+      if raft.gname then CIV.despawnGroup(raft.gname) end
+    end
+    evt.rafts = nil
+  end
 end
 
 -- command center: close an event without any outcome
@@ -644,6 +651,153 @@ CIV.schedule(function(_, t)
 end, nil, 25)
 
 ----------------------------------------------------------------------
+-- SINKING SHIP (mass rescue, rare tier)
+-- A vessel is going down with a dozen survivors in life rafts scattered
+-- around the wreck. Same intel fog as the other sea SAR (approximate
+-- circle, a spotter reveals the exact area via the shared spotter loop),
+-- but recovery is PER RAFT: a helicopter holds a brief hover over a raft
+-- to pull those survivors aboard, one raft at a time, until the ship goes
+-- down (the deadline) and any raft not reached is lost. Needs a "CIVIL
+-- Raft" template; the "CIVIL Sinking" wreck model is optional visual.
+----------------------------------------------------------------------
+
+-- opts (command center): { point = vec3 (must be water), severity = 1..10 }
+function R.startSinking(opts)
+  local sc = R._scenarios.SAR_SINKING
+  if not sc then return nil end
+  local scfg = C.rescue.sinking
+  -- no raft template, no scenario (nothing to rescue)
+  if #CIV.Templates.byPrefix(C.templates.raft) == 0 then
+    CIV.dbg("Sinking: no '" .. C.templates.raft .. "' template, scenario skipped")
+    return nil
+  end
+  local n = 0
+  for _ in pairs(sc.events) do n = n + 1 end
+  if not (opts and opts.point) and n >= scfg.maxActive then return nil end
+
+  local pt
+  if opts and opts.point then
+    if not CIV.isWater(opts.point) then
+      CIV.msgAll("Sinking ship: commanded position is not on open water.", 10)
+      return nil
+    end
+    sc._gmid = (sc._gmid or 0) + 1
+    pt = { name = "GM sinking " .. sc._gmid, radius = 100,
+           point = { x = opts.point.x, y = 0, z = opts.point.z } }
+  else
+    pt = CIV.Pool.pick(C.zones.sarSeaPoints, 1000)
+    if not pt then return nil end
+  end
+
+  sc._eid = sc._eid + 1
+  local sev = (opts and opts.severity)
+    and math.max(1, math.min(10, opts.severity))
+    or CIV.rollSeverity(scfg.severity)
+  local se = C.rescue.severityEffects
+  local evt = {
+    id = sc._eid, pt = pt, point = pt.point, severity = sev,
+    scKey = "SAR_SINKING", spawnTime = timer.getTime(),
+    identified = false, rafts = {}, recovered = 0,
+  }
+  evt.deadlineTotal = scfg.deadline
+    * CIV.sevLerp(sev, se.deadlineFactor.atMin, se.deadlineFactor.atMax)
+  evt.deadline = timer.getTime() + evt.deadlineTotal
+
+  -- optional wreck model at the centre (closeEvent despawns evt.gname)
+  evt.gname = CIV.spawnFromTemplate(C.templates.sinking, pt.point)
+
+  -- scatter the rafts around the wreck, each its own group
+  local count = math.random(scfg.raftCount.min, scfg.raftCount.max)
+  for i = 1, count do
+    local rp = CIV.offsetPoint(pt.point, math.random(0, 359),
+      math.random(30, scfg.spreadRadius))
+    local gname = CIV.spawnBoat(rp, "CIVIL_RAFT", C.templates.raft, C.fallbackTypes.raft)
+    evt.rafts[i] = { gname = gname, point = rp, done = false, dwell = 0, byUnit = nil }
+  end
+
+  -- intel fog: approximate off-centre circle, exact area needs a spotter
+  local intel = C.rescue.intel
+  local circleRadius = CIV.randBetween(intel.approxRadius)
+  local circleCenter = CIV.offsetPoint(evt.point, math.random(0, 359),
+    circleRadius * CIV.randBetween(intel.centerOffset))
+  evt.approxCenter = circleCenter
+  evt.circleId = CIV.markCircle(circleCenter,
+    "Sinking ship #" .. evt.id .. " search area", circleRadius)
+
+  local refPoint, refName = vagueReference(sc.def, evt.point)
+  evt.vagueText = refPoint
+    and CIV.vagueDirection(refPoint, refName, evt.point) or "position unknown"
+
+  sc.events[evt.id] = evt
+  CIV.Pool.occupy(pt)
+  CIV.msgAll("MAYDAY - SINKING SHIP (severity " .. sev .. "/10): " .. count ..
+    " survivors in life rafts, " .. evt.vagueText ..
+    ".\nApproximate search area marked on the F10 map; a spotter overhead " ..
+    "pins the exact area. Hover briefly over each raft to pull them aboard." ..
+    "\nThe ship goes down in about " .. math.floor(evt.deadlineTotal / 60) ..
+    " minutes: every raft not reached by then is lost.", 30)
+  CIV.log("Sinking #" .. evt.id .. " at " .. pt.name .. " severity " .. sev ..
+    " rafts " .. count)
+  return evt
+end
+
+-- raft recovery loop: a brief steady hover over a raft pulls it aboard
+CIV.schedule(function(_, t)
+  local sc = R._scenarios.SAR_SINKING
+  if not sc then return t + 5 end
+  local scfg = C.rescue.sinking
+  local now = timer.getTime()
+  for _, evt in pairs(sc.events) do
+    if now > evt.deadline then
+      local lost = 0
+      for _, raft in ipairs(evt.rafts) do if not raft.done then lost = lost + 1 end end
+      CIV.msgAll("SINKING SHIP #" .. evt.id .. ": the vessel has gone down. " ..
+        evt.recovered .. " survivors recovered, " .. lost .. " lost.", 20)
+      closeEvent(sc, evt)
+    else
+      for _, raft in ipairs(evt.rafts) do
+        if not raft.done then
+          local rescuer = nil
+          CIV.forEachPlayerHelo(function(h, info)
+            if rescuer then return end
+            local hp = h:getPoint()
+            if CIV.dist2D(hp, raft.point) <= scfg.rescueRadius
+               and CIV.agl(hp) <= scfg.maxAGL
+               and CIV.speed(h:getVelocity()) <= scfg.maxSpeed then
+              rescuer = info
+            end
+          end)
+          if rescuer then
+            raft.dwell = raft.dwell + 2   -- 2 s tick
+            raft.byUnit = rescuer.playerName
+            if raft.dwell >= scfg.raftHoldSeconds then
+              raft.done = true
+              if raft.gname then CIV.despawnGroup(raft.gname) end
+              evt.recovered = evt.recovered + 1
+              local timeFactor = math.max(0, (evt.deadline - now) / evt.deadlineTotal)
+              CIV.Score.award(raft.byUnit, "sinking", 0.8, timeFactor,
+                CIV.severityMult(evt.severity), "sinking-ship rescue")
+              CIV.msgAll("SINKING SHIP #" .. evt.id .. ": " .. raft.byUnit ..
+                " pulled a raft aboard (" .. evt.recovered .. "/" ..
+                #evt.rafts .. " survivors safe).", 12)
+              if evt.recovered >= #evt.rafts then
+                CIV.msgAll("SINKING SHIP #" .. evt.id ..
+                  ": ALL survivors recovered. Outstanding work.", 20)
+                closeEvent(sc, evt)
+                break
+              end
+            end
+          else
+            raft.dwell = 0
+          end
+        end
+      end
+    end
+  end
+  return t + 2
+end, nil, 25)
+
+----------------------------------------------------------------------
 -- SCENARIO INSTANCES
 ----------------------------------------------------------------------
 
@@ -670,6 +824,15 @@ R.newScenario({
   maxActive = C.rescue.sarSea.maxActive, beacon = C.rescue.sarSea.beacon,
   severityRange = C.rescue.sarSea.severity,
   scoreType = "sarSea", hoverCfg = C.hover.sarSea,
+})
+
+-- Sinking ship shares the sea region (spotter reveal + vague reference)
+-- but its own recovery mechanic lives in R.startSinking / the raft loop.
+R.newScenario({
+  key = "SAR_SINKING", label = "Sinking ship", kind = "sinking",
+  poolPrefix = C.zones.sarSeaPoints, region = C.zones.sarSeaRegion,
+  maxActive = C.rescue.sinking.maxActive,
+  severityRange = C.rescue.sinking.severity, scoreType = "sinking",
 })
 
 R.newScenario({
@@ -724,6 +887,8 @@ CIV.EventStarters.sarMountain = { label = "SAR Mountain",
   fn = function() return R.startEvent("SAR_MOUNTAIN") end }
 CIV.EventStarters.sarSea = { label = "SAR Sea",
   fn = function() return R.startEvent("SAR_SEA") end }
+CIV.EventStarters.sarSinking = { label = "Sinking ship (mass rescue)",
+  fn = function() return R.startSinking() end }
 CIV.EventStarters.medevac = { label = "MedEvac",
   fn = function() return R.startEvent("MEDEVAC") end }
 CIV.EventStarters.casevac = { label = "Battlefield CASEVAC",

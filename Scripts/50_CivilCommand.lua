@@ -16,6 +16,7 @@
 --                             (forest/landfill/industrial/building)
 --   civil sarm [sev]          mountain SAR subject at the marker
 --   civil sars [sev]          sea SAR subject at the marker (must be water)
+--   civil sinking [sev]       sinking-ship mass rescue at the marker (water)
 --   civil medevac [sev]       MedEvac casualty at the marker
 --   civil casevac [sev]       battlefield casualty at the marker
 --   civil swat [sev]          SWAT objective at the marker
@@ -247,6 +248,13 @@ for word, key in pairs(rescueKeys) do
   end
 end
 
+commands.sinking = function(args, point)
+  if not (CIV.Rescue and CIV.Rescue.startSinking) then moduleMissing("rescue") return end
+  if not CIV.Rescue.startSinking({ point = point, severity = toSeverity(args[1]) }) then
+    say("sinking command failed (needs open water and a CIVIL Raft template).")
+  end
+end
+
 commands.swat = function(args, point)
   if not CIV.SWAT then moduleMissing("police") return end
   if not CIV.SWAT.startScenario({ point = point, severity = toSeverity(args[1]) }) then
@@ -414,7 +422,7 @@ end
 
 commands.help = function()
   say("marker commands:\n" ..
-    CMD.markerPrefix .. " fire|sarm|sars|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|supply|inspect [severity]\n" ..
+    CMD.markerPrefix .. " fire|sarm|sars|sinking|medevac|casevac|swat|chase|convoy|recon|vip|transfer|tour|supply|inspect [severity]\n" ..
     CMD.markerPrefix .. " ship  |  " .. CMD.markerPrefix .. " flight  (ambient traffic)\n" ..
     CMD.markerPrefix .. " cargo [tier] [priority]\n" ..
     CMD.markerPrefix .. " spawn <template> [count]  |  " ..

@@ -89,6 +89,8 @@ CIV.Config = {
     survivor = "CIVIL Survivor",   -- ground group: SAR mountain / medevac casualty
     casualty = "CIVIL Casualty",   -- ground group: battlefield CASEVAC casualty
     boat     = "CIVIL Boat",       -- ship group: SAR sea target
+    sinking  = "CIVIL Sinking",    -- ship group: sinking-ship wreck (optional visual)
+    raft     = "CIVIL Raft",       -- ship group: life raft (sinking scenario survivor)
     vessel   = "CIVIL Vessel",     -- ship group: spawned rescue boat
     swatTeam = "CIVIL SWAT Team",  -- ground group: SWAT squad (unit count from template scaled at spawn)
     fugitive = "CIVIL Fugitive",   -- vehicle group: police chase car
@@ -107,6 +109,7 @@ CIV.Config = {
   fallbackTypes = {
     survivor   = "Soldier M4",
     boat       = "ZWEZDNY",        -- TO VALIDATE on the chosen map
+    raft       = "speedboat",      -- life raft fallback, TO VALIDATE type name
     rescueBoat = "speedboat",      -- stock small boat, TO VALIDATE type name
     swat       = "Soldier M4",
     fugitive   = "LandRover_ah",   -- TO VALIDATE on the chosen map
@@ -157,6 +160,7 @@ CIV.Config = {
       fireC130    = 12,
       sarMountain = 20,
       sarSea      = 25,     -- sea SAR with waves is worth more than flat transport
+      sinking     = 12,     -- per survivor recovered from a sinking (many per event)
       medevac     = 20,
       casevac     = 22,     -- battlefield extraction: hostile setting premium
       chase       = 15,
@@ -299,8 +303,12 @@ CIV.Config = {
       { name = "forest fire",     weight = 70, smokeOnly = false, growMult = 1.0, match = "forest" },
       { name = "landfill fire",   weight = 15, smokeOnly = true,  growMult = 0.6, match = "landfill",
         startSize = 3, compact = true },
+      -- an industrial/factory fire is unlikely to break out while a wildfire
+      -- outbreak is under way: suppressedBy drops this kind's pick weight to
+      -- near zero if any active fire's kind matches one in the list. Scattered
+      -- forest fires can still coexist among themselves.
       { name = "industrial fire", weight = 15, smokeOnly = false, growMult = 1.5, match = "industrial",
-        startSize = 3, compact = true },
+        startSize = 3, compact = true, suppressedBy = { "forest" } },
       -- Building fires NEVER roll on generic points (weight 0): they only
       -- ignite on fire points whose zone name contains "building", or on
       -- GM command. Structural firefighting is precision work: helicopter
@@ -413,6 +421,27 @@ CIV.Config = {
                  file = "l10-beacon.ogg", freqHz = 40500000, modulation = 1, power = 100 },
     },
     sarSea  = { maxActive = 2, severity = { min = 1, max = 10 }, beacon = { enabled = false } },
+
+    -- Sinking ship (mass rescue, RARE): a vessel is going down and a dozen
+    -- survivors are in life rafts scattered around the wreck. Same intel
+    -- fog as the other sea SAR (approximate circle, a spotter reveals the
+    -- exact area), but recovery is per-raft: a helicopter holds a brief
+    -- hover over a raft to pull those survivors aboard, one raft at a time.
+    -- The deadline is the ship going down for good: rafts not reached by
+    -- then are lost. Needs a "CIVIL Raft" template (no template = no
+    -- scenario); the "CIVIL Sinking" wreck model is optional visual.
+    sinking = {
+      maxActive     = 1,
+      severity      = { min = 6, max = 10 },  -- it is the grave tier
+      raftCount     = { min = 8, max = 12 },  -- survivors in rafts, rolled per event
+      spreadRadius  = 400,     -- m, rafts scattered this far around the wreck
+      raftHoldSeconds = 15,    -- s of steady hover over a raft to recover it
+      rescueRadius  = 40,      -- m, horizontal distance to a raft
+      maxAGL        = 25,      -- m, hover height band for the pickup
+      maxSpeed      = 3.0,     -- m/s, must be near-stationary
+      deadline      = 2400,    -- s baseline before the ship goes down (scaled by severity)
+    },
+
     medevac = {
       maxActive   = 2,
       criticality = 1800,  -- s baseline, scaled by severity (see severityEffects)
@@ -608,7 +637,6 @@ CIV.Config = {
     interval = { min = 480, max = 1200 },
     chance   = {   -- module key -> probability % (0 = manual start only)
       sarMountain = 25,
-      sarSea      = 20,
       medevac     = 25,
       casevac     = 20,
       chase       = 25,
@@ -616,13 +644,35 @@ CIV.Config = {
       transport   = 40,
       recon       = 20,
       vip         = 20,
-      inspection  = 20,
+      seaEvent    = 30,   -- ONE sea roll, tier picked by weight (see seaTiers)
       convoy      = 15,
       tour        = 15,
       supply      = 20,
       -- fires have their own dedicated scheduler (fire.autoIgnite);
       -- sea/air ambient traffic have their own spawn schedulers too
     },
+
+    -- Sea event RARITY tiers: the "seaEvent" roll weighted-picks WHICH sea
+    -- event to start. Ship inspection is the everyday job, a sea rescue is
+    -- less common, a sinking with many survivors is rare. If the picked
+    -- tier cannot start (e.g. inspection with no merchant at sea) the roll
+    -- falls through to the next-most-likely tier so it is not wasted.
+    seaTiers = {
+      { key = "inspection", weight = 60 },
+      { key = "sarSea",     weight = 30 },
+      { key = "sarSinking", weight = 10 },
+    },
+
+    -- CO-OCCURRENCE BUDGET: keep too many SEVERE events from piling up. The
+    -- director sums the severity of the active "serious" events across every
+    -- module (CIV.severityLoad) and scales every chance down as the load
+    -- approaches severityBudget, reaching zero at the budget. Grave events
+    -- weigh more, so they choke the pipeline hardest: a raging wildfire (its
+    -- severity counts too) quiets the other callouts on its own. Light tasks
+    -- (recon/vip/tour/media/transport) are NOT counted, they never crowd
+    -- each other out. Fires keep their own scheduler and are not throttled,
+    -- only counted.
+    severityBudget = 24,
   },
 
   ------------------------------------------------------------------
@@ -1029,6 +1079,39 @@ end
 function CIV.severityMult(sev)
   local s = CIV.Config.score.severity
   return s.base + s.perPoint * math.max(1, math.min(10, sev))
+end
+
+-- Total severity currently in play across the SERIOUS event types, summed
+-- read-only from each module's active collection (all guarded, so unloaded
+-- modules contribute nothing). Drives the director co-occurrence budget:
+-- the busier and graver the map, the fewer new callouts. Light tasks
+-- (recon/vip/tour/media/transport) are deliberately excluded.
+function CIV.severityLoad()
+  local load = 0
+  if CIV.Fire then
+    for _, fire in pairs(CIV.Fire.actives()) do load = load + (fire.severity or 0) end
+  end
+  if CIV.Rescue then
+    for _, sc in pairs(CIV.Rescue._scenarios) do
+      for _, evt in pairs(sc.events) do load = load + (evt.severity or 0) end
+    end
+  end
+  if CIV.Police then
+    for _, chase in pairs(CIV.Police._chases) do load = load + (chase.severity or 0) end
+  end
+  if CIV.SWAT then
+    for _, scen in pairs(CIV.SWAT._scenarios) do load = load + (scen.severity or 0) end
+  end
+  if CIV.Convoy then
+    for _, run in pairs(CIV.Convoy._runs) do load = load + (run.severity or 0) end
+  end
+  if CIV.CoastGuard then
+    for _, task in pairs(CIV.CoastGuard._tasks) do load = load + (task.severity or 0) end
+  end
+  if CIV.SupplyDrop then
+    for _, evt in pairs(CIV.SupplyDrop._events) do load = load + (evt.severity or 0) end
+  end
+  return load
 end
 
 -- weighted random pick from a list of { weight = n, ... } entries
@@ -2025,14 +2108,45 @@ CIV.EventStarters = {}
 
 -- Keeps rescheduling even while disabled, so the command center can turn
 -- the automatic director off and on again at runtime ("civil director on").
+-- One sea roll picks WHICH sea event to start, by rarity weight, falling
+-- through to the next tier when the picked one cannot start (e.g. no
+-- merchant at sea for an inspection).
+local function startSeaEvent()
+  local tiers = {}
+  for _, tier in ipairs(CIV.Config.director.seaTiers) do
+    tiers[#tiers + 1] = { key = tier.key, weight = tier.weight }
+  end
+  while #tiers > 0 do
+    local pick = CIV.weightedPick(tiers)
+    local starter = CIV.EventStarters[pick.key]
+    if starter then
+      local ok, res = pcall(starter.fn)
+      if ok and res then return res end
+    end
+    -- picked tier could not start: drop it and try the next
+    for i, tier in ipairs(tiers) do
+      if tier.key == pick.key then table.remove(tiers, i) break end
+    end
+  end
+  return nil
+end
+
 CIV.schedule(function(_, t)
   local cfg = CIV.Config.director
   if cfg.enabled then
+    -- co-occurrence budget: throttle every chance as the severity load
+    -- climbs, reaching zero at the budget (grave events choke hardest)
+    local factor = math.max(0, 1 - CIV.severityLoad() / cfg.severityBudget)
     for key, chance in pairs(cfg.chance) do
-      local starter = CIV.EventStarters[key]
-      if starter and math.random(100) <= chance then
-        local ok, err = pcall(starter.fn)
-        if not ok then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
+      if math.random(100) <= chance * factor then
+        local ok, err
+        if key == "seaEvent" then
+          ok, err = pcall(startSeaEvent)
+        else
+          local starter = CIV.EventStarters[key]
+          if starter then ok, err = pcall(starter.fn) end
+        end
+        if ok == false then CIV.log("Director: start '" .. key .. "' failed: " .. tostring(err)) end
       end
     end
   end

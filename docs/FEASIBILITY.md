@@ -125,6 +125,12 @@ patterns (`supplyDrop.c130Types`, default Hercules/C-130/C130): validate
 them against the official module's real type name in dcs.log at first
 spawn, same caveat as the air-attack type list.
 
+**Sinking-ship mass rescue (v0.6)**: rafts are individual ship groups on
+water (standard use case); the `CIVIL Raft` fallback type (`speedboat`) and
+the optional `CIVIL Sinking` wreck model are TO VALIDATE on the chosen map.
+The co-occurrence budget and fire-kind exclusion are pure director logic,
+no DCS API risk.
+
 ## Corrections / clarifications vs the concept
 
 - **`world.setPersistenceHandler`**: I found NO evidence this exists as a
