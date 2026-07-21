@@ -845,6 +845,14 @@ CIV.Config = {
       track   = { radius = 3000, graceSeconds = 180 },  -- lose contact this long = ship slips away
       boatHold = { radius = 300, seconds = 60 },        -- patrol boat alongside = boarding
       fleeSpeed = 10,          -- m/s a suspect runs at
+      -- TARGET SELECTION (hybrid): prefer a merchant already sailing the
+      -- lanes (realistic, reuses the ambient traffic); if none is free and
+      -- dedicatedFallback is on, SPAWN one that sails a route so the task
+      -- always works even without ambient traffic. A dedicated ship sails
+      -- off and despawns once the inspection ends. dedicatedOnly always
+      -- spawns a fresh merchant and ignores the ambient traffic.
+      dedicatedFallback = true,
+      dedicatedOnly     = false,
     },
   },
 

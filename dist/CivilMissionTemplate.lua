@@ -855,6 +855,14 @@ CIV.Config = {
       track   = { radius = 3000, graceSeconds = 180 },  -- lose contact this long = ship slips away
       boatHold = { radius = 300, seconds = 60 },        -- patrol boat alongside = boarding
       fleeSpeed = 10,          -- m/s a suspect runs at
+      -- TARGET SELECTION (hybrid): prefer a merchant already sailing the
+      -- lanes (realistic, reuses the ambient traffic); if none is free and
+      -- dedicatedFallback is on, SPAWN one that sails a route so the task
+      -- always works even without ambient traffic. A dedicated ship sails
+      -- off and despawns once the inspection ends. dedicatedOnly always
+      -- spawns a fresh merchant and ignores the ambient traffic.
+      dedicatedFallback = true,
+      dedicatedOnly     = false,
     },
   },
 
@@ -6983,6 +6991,41 @@ local function removeShip(ship, despawnAfter)
   CIV.schedule(function() CIV.despawnGroup(gname) end, nil, despawnAfter or 1)
 end
 
+-- Spawn a merchant on demand for a coast guard inspection (hybrid target
+-- selection: used when no ambient merchant is free). It sails a real route
+-- so the "inspect a moving vessel" mechanic still applies; if no sea zones
+-- are defined it runs a straight line so it moves anyway. Registered like a
+-- normal SEA ship (flagged dedicated) so the flee/board/cleanup logic is
+-- shared. Bypasses the ambient traffic cap.
+function SEA.spawnDedicated(nearPoint)
+  local spawnP
+  if nearPoint then
+    spawnP = { x = nearPoint.x, z = nearPoint.z }
+  else
+    local areas = CIV.Zones.byPrefix(C.zones.seaSpawn)
+    if #areas == 0 then return nil end   -- nowhere sensible to place it
+    local area = areas[math.random(#areas)]
+    spawnP = randomPointIn(area, ST.minSpawnGap)
+      or { x = area.center.x, z = area.center.z }
+  end
+  local hops, dzArea = buildRoute(spawnP)
+  local endP = dzArea and { x = dzArea.center.x, z = dzArea.center.z }
+    or CIV.offsetPoint(spawnP, math.random(0, 359), 15000)  -- straight run
+
+  SEA._sid = SEA._sid + 1
+  local gname = CIV.spawnBoat({ x = spawnP.x, y = 0, z = spawnP.z },
+    "CIVIL_MERCHANT", C.templates.merchant, C.fallbackTypes.merchant)
+  local ship = {
+    id = SEA._sid, gname = gname, hops = hops, endP = endP,
+    speed = ST.speed, spawnedAt = timer.getTime(), inspection = nil,
+    dedicated = true,
+  }
+  SEA._ships[ship.id] = ship
+  CIV.schedule(function() routeShip(ship, spawnP, ship.speed) end, nil, 2)
+  CIV.log("Sea traffic: dedicated inspection merchant #" .. ship.id .. " spawned")
+  return ship
+end
+
 -- traffic loop: arrivals, hard cleanup, spawn cadence
 local nextSeaSpawn = timer.getTime() + CIV.randBetween(ST.spawnEvery)
 CIV.schedule(function(_, t)
@@ -7017,25 +7060,34 @@ local CGD = CIV.CoastGuard
 --                          marker), severity = 1..10 }
 function CGD.start(opts)
   if not CG.enabled then return nil end
-  local candidates = {}
-  for _, ship in pairs(SEA._ships) do
-    if not ship.inspection then
-      local u = shipUnit(ship)
-      if u then candidates[#candidates + 1] = { ship = ship, unit = u } end
-    end
-  end
-  if #candidates == 0 then return nil end
 
+  -- HYBRID: prefer a merchant already at sea (unless dedicatedOnly), else
+  -- spawn one for the inspection (dedicatedFallback).
   local pick
-  if opts and opts.point then
-    local bestDist = 1e12
-    for _, cand in ipairs(candidates) do
-      local d = CIV.dist2D(cand.unit:getPoint(), opts.point)
-      if d < bestDist then pick, bestDist = cand, d end
+  if not CG.dedicatedOnly then
+    local candidates = {}
+    for _, ship in pairs(SEA._ships) do
+      if not ship.inspection then
+        local u = shipUnit(ship)
+        if u then candidates[#candidates + 1] = { ship = ship, unit = u } end
+      end
     end
-  else
-    pick = candidates[math.random(#candidates)]
+    if opts and opts.point then
+      local bestDist = 1e12
+      for _, cand in ipairs(candidates) do
+        local d = CIV.dist2D(cand.unit:getPoint(), opts.point)
+        if d < bestDist then pick, bestDist = cand, d end
+      end
+    elseif #candidates > 0 then
+      pick = candidates[math.random(#candidates)]
+    end
   end
+  if not pick and (CG.dedicatedFallback or CG.dedicatedOnly) then
+    local ship = SEA.spawnDedicated(opts and opts.point)
+    local u = ship and shipUnit(ship)
+    if u then pick = { ship = ship, unit = u } end
+  end
+  if not pick then return nil end
 
   CGD._tid = CGD._tid + 1
   local task = {
@@ -7060,7 +7112,14 @@ function CGD.start(opts)
 end
 
 local function closeTask(task)
-  if task.ship then task.ship.inspection = nil end
+  if task.ship then
+    task.ship.inspection = nil
+    -- a dedicated merchant was spawned just for this task: let it sail off
+    -- and despawn (unless another path already removed it)
+    if task.ship.dedicated and SEA._ships[task.ship.id] then
+      removeShip(task.ship, 30)
+    end
+  end
   if task.boatGname then
     local gname = task.boatGname
     CIV.schedule(function() CIV.despawnGroup(gname) end, nil, 120)

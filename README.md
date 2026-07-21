@@ -237,7 +237,11 @@ A clean manifest pays a partial score; suspicious cargo escalates: the
 ship runs for it, you keep track of it (3 km) and a patrol boat launches
 from the nearest `CIVIL Vessel Spawn` harbor to board it. Full score to
 the inspecting pilot on the boarding, task failed if contact stays lost
-too long.
+too long. Target selection is HYBRID (`coastGuard.dedicatedFallback`):
+the inspection prefers a merchant already sailing the lanes, but if none
+is free it spawns one that sails a route, so the task works even without
+ambient traffic; a dedicated ship leaves once the inspection ends. Set
+`coastGuard.dedicatedOnly` to always spawn a fresh merchant.
 
 **Ambient air traffic** (`46_CivilAirTraffic.lua`): AI civil flights
 between the map airdromes keep the sky alive, capped at
